@@ -62,6 +62,54 @@ class LupeContentManager:
             # Don't raise - allow fallback operation
             logger.info("Continuing with data-only operation (no AI models)")
     
+    def _calculate_weighted_similarity(self, candidate_movie, target_movie, target_genres, candidate_genres):
+        """Calculate enhanced weighted similarity with multiple factors"""
+        try:
+            # Genre weights (some genres are more distinctive)
+            genre_weights = {
+                'Documentary': 2.0, 'Animation': 1.8, 'Musical': 1.7, 'Western': 1.6,
+                'Horror': 1.5, 'Sci-Fi': 1.4, 'Fantasy': 1.3, 'War': 1.2,
+                'Romance': 1.1, 'Comedy': 1.0, 'Drama': 0.9, 'Action': 0.8,
+                'Thriller': 0.8, 'Crime': 0.8, 'Adventure': 0.7
+            }
+            
+            # Weighted Jaccard similarity
+            intersection_weight = sum(genre_weights.get(g, 1.0) for g in target_genres & candidate_genres)
+            union_weight = sum(genre_weights.get(g, 1.0) for g in target_genres | candidate_genres)
+            weighted_genre_score = intersection_weight / union_weight if union_weight > 0 else 0
+            
+            # Release year proximity (movies from similar eras are more similar)
+            target_year = target_movie.get('year', 0) or 0
+            candidate_year = candidate_movie.get('year', 0) or 0
+            if target_year > 0 and candidate_year > 0:
+                year_diff = abs(target_year - candidate_year)
+                year_score = max(0, 1 - (year_diff / 50.0))  # Decay over 50 years
+            else:
+                year_score = 0.5  # Neutral for missing years
+            
+            # Runtime similarity (similar length movies)
+            target_runtime = target_movie.get('runtime', 0) or 0
+            candidate_runtime = candidate_movie.get('runtime', 0) or 0
+            if target_runtime > 0 and candidate_runtime > 0:
+                runtime_diff = abs(target_runtime - candidate_runtime)
+                runtime_score = max(0, 1 - (runtime_diff / 120.0))  # Decay over 2 hours
+            else:
+                runtime_score = 0.5  # Neutral for missing runtime
+            
+            # Combine factors with weights
+            total_score = (
+                weighted_genre_score * 0.6 +  # Genres still most important
+                year_score * 0.25 +           # Year proximity 
+                runtime_score * 0.15          # Runtime similarity
+            )
+            
+            return min(1.0, total_score)
+            
+        except Exception as e:
+            logger.error(f"Error in weighted similarity calculation: {e}")
+            # Fallback to simple Jaccard
+            return len(target_genres & candidate_genres) / len(target_genres | candidate_genres) if target_genres and candidate_genres else 0
+
     def load_movie_data(self):
         """Load movie data (lookup, dataframe, genres) - separate from model"""
         try:
@@ -790,9 +838,16 @@ class LupeContentManager:
                 
                 movie_genre_set = set(movie_genres.split('|')) if movie_genres else set()
                 
-                # Calculate genre similarity
+                # Calculate genre similarity (original Jaccard + enhanced weighted)
                 if target_genre_set and movie_genre_set:
-                    similarity = len(target_genre_set & movie_genre_set) / len(target_genre_set | movie_genre_set)
+                    # Original Jaccard similarity
+                    jaccard_similarity = len(target_genre_set & movie_genre_set) / len(target_genre_set | movie_genre_set)
+                    
+                    # Enhanced weighted similarity with additional factors
+                    weighted_similarity = self._calculate_weighted_similarity(movie_info, target_movie, target_genre_set, movie_genre_set)
+                    
+                    # Combine both approaches (70% weighted, 30% original)
+                    similarity = 0.7 * weighted_similarity + 0.3 * jaccard_similarity
                 else:
                     similarity = 0
                 
@@ -836,9 +891,16 @@ class LupeContentManager:
                 
                 show_genre_set = set(show_genres.split('|')) if show_genres else set()
                 
-                # Calculate genre similarity
+                # Calculate genre similarity (original Jaccard + enhanced weighted)
                 if target_genre_set and show_genre_set:
-                    similarity = len(target_genre_set & show_genre_set) / len(target_genre_set | show_genre_set)
+                    # Original Jaccard similarity
+                    jaccard_similarity = len(target_genre_set & show_genre_set) / len(target_genre_set | show_genre_set)
+                    
+                    # Enhanced weighted similarity with additional factors
+                    weighted_similarity = self._calculate_weighted_similarity(show_info, target_show, target_genre_set, show_genre_set)
+                    
+                    # Combine both approaches (70% weighted, 30% original)
+                    similarity = 0.7 * weighted_similarity + 0.3 * jaccard_similarity
                 else:
                     similarity = 0
                 
