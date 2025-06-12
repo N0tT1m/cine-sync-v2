@@ -14,7 +14,7 @@ class DatabaseConfig:
 
 @dataclass
 class ModelConfig:
-    models_dir: str = "../models"
+    models_dir: str = "models"
     device: str = "auto"
     batch_size: int = 64
     learning_rate: float = 0.001
@@ -46,9 +46,9 @@ def load_config() -> Config:
         password=os.getenv("DB_PASSWORD", "")
     )
     
-    # Model config
+    # Model config  
     model = ModelConfig(
-        models_dir=os.getenv("MODELS_DIR", "../models"),
+        models_dir=os.getenv("MODELS_DIR", "models"),
         device=os.getenv("DEVICE", "auto"),
         batch_size=int(os.getenv("BATCH_SIZE", "64")),
         learning_rate=float(os.getenv("LEARNING_RATE", "0.001")),
