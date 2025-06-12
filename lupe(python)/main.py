@@ -1534,13 +1534,15 @@ async def get_collaborative_recommendations(user_id: int, limit: int, genre_filt
                 # Get prediction
                 score = bot.model(user_tensor, movie_tensor, genre_tensor).item()
 
-                # Convert back from scaled rating
+                # Convert back from scaled rating and normalize to 0-1 range
                 if bot.rating_scaler:
                     score = bot.rating_scaler.inverse_transform([[score]])[0][0]
+                    # Normalize rating scores (typically 0.5-5.0) to 0-1 range
+                    score = max(0, min(1, (score - 0.5) / 4.5))
 
                 # Add small random noise for diversity
                 noise = np.random.normal(0, 0.05)
-                score_with_noise = score + noise
+                score_with_noise = max(0, min(1, score + noise))
 
                 recommendations.append((
                     movie_id,  # Original movie ID
@@ -1608,8 +1610,9 @@ async def get_content_based_recommendations(movie_title: str, limit: int, genre_
             else:
                 similarity = 0
             
-            # Add randomness for diversity
+            # Add randomness for diversity and ensure score stays in 0-1 range
             similarity += np.random.uniform(0, 0.1)
+            similarity = max(0, min(1, similarity))
 
             recommendations.append((
                 movie_id,
@@ -1655,7 +1658,7 @@ async def get_genre_recommendations(genre: str, limit: int) -> List[tuple]:
                 variety_bonus = min(len(genre_list) * 0.1, 0.3)
                 randomness = np.random.uniform(0, 0.2)
                 
-                final_score = genre_match_score + variety_bonus + randomness
+                final_score = max(0, min(1, genre_match_score + variety_bonus + randomness))
 
                 recommendations.append((
                     movie_id,
@@ -1707,7 +1710,7 @@ async def get_popular_recommendations(limit: int, genre_filter: str = None) -> L
             else:
                 popularity_bonus = 0
             
-            final_score = base_score + popularity_bonus
+            final_score = max(0, min(1, base_score + popularity_bonus))
 
             recommendations.append((
                 movie_id,
