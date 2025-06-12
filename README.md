@@ -414,6 +414,91 @@ You should consider migrating from simplified to full-featured when you need:
 
 The simplified version is perfect for getting started, learning, and basic use cases, but the full-featured version provides production-ready capabilities.
 
+## 📊 Dataset Information
+
+### 🎯 CineSync Complete Training Dataset
+
+This project uses a comprehensive multi-modal dataset containing **130M+ ratings** across movies, TV shows, anime, and actor data. The dataset includes:
+
+**🎬 Movie Datasets:**
+- **MovieLens 32M** (229MB) - 32M+ ratings from 280K users on 87K movies
+- **Netflix Prize Archive** (664MB) - Historic 100M+ ratings from $1M competition  
+- **TMDB Actor Data** (502MB) - Complete filmography and career information
+- **Additional Movie Data** (1.4GB) - Supplementary training datasets
+
+**📺 TV Show Datasets:**
+- **TMDB TV Shows** (32MB) - 150K TV shows with comprehensive metadata
+- **MyAnimeList** (227MB) - Anime ratings and reviews from community
+- **IMDb TV Series** (28MB) - TV series organized by 22+ genres
+- **Netflix TV Catalog** (1.4MB) - Netflix content metadata
+
+**📈 Key Statistics:**
+- **Total Size**: ~7GB compressed, ~15GB+ extracted
+- **Ratings**: 130M+ explicit ratings across all sources
+- **Content**: 87K+ movies, 150K+ TV shows, comprehensive actor data
+- **Time Span**: 1995-2023 (28 years of rating data)
+- **Quality**: Research-grade datasets used in academic papers
+
+### 🚀 Dataset Setup Options
+
+#### Option 1: Automated Download (Recommended)
+```bash
+# Run the dataset setup script
+python setup_datasets.py
+
+# This will:
+# 1. Check for existing datasets
+# 2. Attempt automatic downloads where possible
+# 3. Provide manual download links with instructions
+# 4. Organize datasets in correct folder structure
+```
+
+#### Option 2: Manual Download
+If automatic download fails, get the complete dataset from:
+
+**🔗 [CineSync Complete Dataset on Kaggle](https://kaggle.com/datasets/nott1m/cinesync-complete-training-dataset)**
+
+1. Download and extract to project root
+2. Run `python organize_datasets.py` to set up folder structure
+3. Verify setup with `python check_datasets.py`
+
+#### Option 3: Individual Dataset Downloads
+For advanced users who want specific datasets:
+
+```bash
+# MovieLens 32M (Required)
+wget https://files.grouplens.org/datasets/movielens/ml-32m.zip
+unzip ml-32m.zip
+
+# TMDB TV Shows (Recommended) 
+# Download from: [TMDB TV Dataset on Kaggle]
+
+# MyAnimeList (Optional)
+# Download from: [MyAnimeList Dataset on Kaggle]
+```
+
+### 📁 Expected Folder Structure
+
+After setup, your project should have:
+```
+cine-sync-v2/
+├── ml-32m/                    # MovieLens 32M dataset
+│   ├── ratings.csv            # 32M+ user ratings
+│   ├── movies.csv             # Movie metadata
+│   ├── tags.csv               # User-generated tags
+│   └── links.csv              # IMDB/TMDB cross-references
+├── archive/                   # Netflix Prize historic data
+│   ├── combined_data_*.txt    # 100M+ Netflix ratings
+│   └── movie_titles.csv       # Netflix movie catalog
+├── tmdb/                      # TMDB actor and movie data
+│   ├── actor_filmography_data.csv
+│   └── actor_filmography_data_*.csv
+├── tv/                        # TV show datasets
+│   ├── *.zip                  # Compressed TV datasets
+│   └── netflix_tv_shows.csv   # Netflix TV catalog
+└── models/                    # Trained models (created during training)
+```
+
 ## 📋 Installation & Setup
 
 ### Prerequisites
@@ -421,7 +506,7 @@ The simplified version is perfect for getting started, learning, and basic use c
 #### System Requirements
 - **Operating System**: Windows 10/11, Linux, or macOS
 - **Memory**: 8GB RAM minimum (16GB recommended for training)
-- **Storage**: 15GB free space for datasets and models
+- **Storage**: 20GB free space for datasets and models
 - **Docker**: For PostgreSQL database (recommended)
 
 #### Software Dependencies
@@ -669,12 +754,13 @@ class HybridRecommenderModel(nn.Module):
 #### Data Sources for Movies
 - **MovieLens Dataset**: 32 million ratings from 280,000 users on 58,000 movies
 - **TMDB Integration**: Comprehensive movie metadata, genres, cast, and crew
-- **Netflix Dataset**: Additional training data for content-based filtering
+- **Netflix Movies Dataset**: Available in `/movies/netflix_movies.csv` - contains 6,131 Netflix movie entries. Source: [Kaggle Netflix Movies and TV Shows Dataset](https://www.kaggle.com/datasets/shivamb/netflix-shows)
 
-#### Data Sources for TV Shows (Planned)
-- **Full TMDb TV Shows Dataset**: 150,000+ TV shows with comprehensive metadata
-- **MyAnimeList Dataset**: 300,000 users, 80 million ratings for series and anime
-- **IMDb TV Series Dataset**: Industry-standard TV series ratings and metadata
+#### Data Sources for TV Shows
+- **Netflix TV Shows Dataset**: Available in `/tv/netflix_tv_shows.csv` - contains 2,676 Netflix TV show entries. Source: [Kaggle Netflix Movies and TV Shows Dataset](https://www.kaggle.com/datasets/shivamb/netflix-shows)
+- **Full TMDb TV Shows Dataset**: 150,000+ TV shows with comprehensive metadata (planned)
+- **MyAnimeList Dataset**: 300,000 users, 80 million ratings for series and anime (planned)
+- **IMDb TV Series Dataset**: Industry-standard TV series ratings and metadata (planned)
 
 #### Training Configuration
 ```python

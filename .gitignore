@@ -1,15 +1,30 @@
+# Dataset folders (large files excluded from git)
 /ml-32m/
 /tmdb/
 /archive/
-/models/*
-!/models/*.py
 /movies/
 /tv/
+/kaggle_complete_dataset/
+/kaggle_dataset/
+
+# Model files (generated during training)
+/models/*
+!/models/*.py
 /lupe(python)/models/*
 !/lupe(python)/models/*.py
 *.pt
 *.pkl
+
+# Data files (too large for git)
 *.csv
+*.zip
+*.txt
+*.json
+
+# Keep important small config files
+!dataset-metadata.json
+!requirements.txt
+!*.md
 
 # Environment variables and sensitive configuration
 .env

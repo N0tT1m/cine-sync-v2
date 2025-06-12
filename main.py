@@ -21,6 +21,38 @@ from datetime import datetime
 from pathlib import Path
 import wandb
 
+def check_datasets_before_training():
+    """Check if required datasets are available before starting training."""
+    print("🔍 Checking datasets before training...")
+    
+    # Check for required dataset files
+    required_files = [
+        'ml-32m/ratings.csv',
+        'ml-32m/movies.csv'
+    ]
+    
+    missing_files = []
+    for file_path in required_files:
+        if not os.path.exists(file_path):
+            missing_files.append(file_path)
+    
+    if missing_files:
+        print("❌ Missing required datasets:")
+        for file_path in missing_files:
+            print(f"   • {file_path}")
+        
+        print("\n📥 To get the required datasets:")
+        print("1. Run: python setup_datasets.py")
+        print("2. Or download from: https://kaggle.com/datasets/nott1m/cinesync-complete-training-dataset")
+        print("3. Then organize: python organize_datasets.py")
+        print("4. Verify: python check_datasets.py")
+        
+        print(f"\n💡 For detailed dataset status: python check_datasets.py --detailed")
+        return False
+    
+    print("✅ Required datasets found!")
+    return True
+
 from config import load_config
 from models import HybridRecommenderModel, MovieDataset, create_model, save_model, load_model
 from utils import DatabaseManager, load_ratings_data, load_movies_data
@@ -999,6 +1031,11 @@ def train_model(train_data, val_data, movies_df, genres, mappings, device, epoch
 
 def main():
     """Main training function"""
+    # Check datasets before starting
+    if not check_datasets_before_training():
+        print("\n🛑 Training aborted due to missing datasets")
+        sys.exit(1)
+    
     # Load configuration
     config = load_config()
     logger = setup_logging(config)

@@ -180,59 +180,77 @@ class IndividualContentFeedbackView(View):
             content_id, title, content_type, score = self.recommendations[self.current_index]
             
             # Add navigation info
-            self.add_item(discord.ui.Button(
+            nav_button = discord.ui.Button(
                 label=f"{self.current_index + 1}/{len(self.recommendations)}: {title[:30]}...",
                 style=discord.ButtonStyle.secondary,
                 disabled=True
-            ))
+            )
+            self.add_item(nav_button)
             
-            # Add feedback buttons
-            self.add_item(discord.ui.Button(
+            # Add feedback buttons with callbacks
+            love_button = discord.ui.Button(
                 label="💖 Love it!",
                 style=discord.ButtonStyle.green,
                 custom_id=f"love_{self.current_index}"
-            ))
-            self.add_item(discord.ui.Button(
+            )
+            love_button.callback = self.button_callback
+            self.add_item(love_button)
+            
+            like_button = discord.ui.Button(
                 label="👍 Like it",
                 style=discord.ButtonStyle.success,
                 custom_id=f"like_{self.current_index}"
-            ))
-            self.add_item(discord.ui.Button(
+            )
+            like_button.callback = self.button_callback
+            self.add_item(like_button)
+            
+            dislike_button = discord.ui.Button(
                 label="👎 Dislike it",
                 style=discord.ButtonStyle.danger,
                 custom_id=f"dislike_{self.current_index}"
-            ))
-            self.add_item(discord.ui.Button(
+            )
+            dislike_button.callback = self.button_callback
+            self.add_item(dislike_button)
+            
+            hate_button = discord.ui.Button(
                 label="💔 Hate it",
                 style=discord.ButtonStyle.red,
                 custom_id=f"hate_{self.current_index}"
-            ))
+            )
+            hate_button.callback = self.button_callback
+            self.add_item(hate_button)
             
             # Navigation buttons
             if self.current_index > 0:
-                self.add_item(discord.ui.Button(
+                prev_button = discord.ui.Button(
                     label="⬅️ Previous",
                     style=discord.ButtonStyle.secondary,
                     custom_id="previous"
-                ))
+                )
+                prev_button.callback = self.button_callback
+                self.add_item(prev_button)
             
             if self.current_index < len(self.recommendations) - 1:
-                self.add_item(discord.ui.Button(
+                next_button = discord.ui.Button(
                     label="➡️ Next",
                     style=discord.ButtonStyle.secondary,
                     custom_id="next"
-                ))
+                )
+                next_button.callback = self.button_callback
+                self.add_item(next_button)
             else:
-                self.add_item(discord.ui.Button(
+                submit_button = discord.ui.Button(
                     label="✅ Submit All Feedback",
                     style=discord.ButtonStyle.primary,
                     custom_id="submit"
-                ))
+                )
+                submit_button.callback = self.button_callback
+                self.add_item(submit_button)
     
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return True
     
-    async def on_button_click(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def button_callback(self, interaction: discord.Interaction):
         custom_id = button.custom_id
         
         if custom_id.startswith(('love_', 'like_', 'dislike_', 'hate_')):
