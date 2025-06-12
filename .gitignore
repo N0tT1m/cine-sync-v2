@@ -1,10 +1,12 @@
 /ml-32m/
 /tmdb/
 /archive/
-/models/
+/models/*
+!/models/*.py
 /movies/
 /tv/
-/lupe(python)/models/
+/lupe(python)/models/*
+!/lupe(python)/models/*.py
 *.pt
 *.pkl
 *.csv
