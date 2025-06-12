@@ -24,10 +24,10 @@ import re
 from datetime import datetime
 from typing import List, Optional, Tuple
 
+# Add current directory to path for local models (first so it takes precedence)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # Add parent directory to path for utils
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-# Add current directory to path for local models
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from config import load_config
 from models import HybridRecommenderModel, load_model, LupeContentManager
