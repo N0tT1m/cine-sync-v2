@@ -396,7 +396,7 @@ class LupeContentManager:
                         str(movie_id),
                         movie_info.get('title', 'Unknown'),
                         'movie',
-                        score + np.random.normal(0, 0.05)  # Add noise for diversity
+                        max(0, min(1, score + np.random.normal(0, 0.05)))  # Add noise for diversity with bounds
                     ))
             
             # Sort by score and return
@@ -464,7 +464,7 @@ class LupeContentManager:
                         str(show_id),
                         show_info.get('title', 'Unknown'),
                         'tv',
-                        score + np.random.normal(0, 0.05)  # Add noise for diversity
+                        max(0, min(1, score + np.random.normal(0, 0.05)))  # Add noise for diversity with bounds
                     ))
             
             # Sort by score and return
@@ -589,9 +589,9 @@ class LupeContentManager:
         if str(movie_id) in user_content_prefs:
             content_pref = user_content_prefs[str(movie_id)]
             if content_pref == 'love':
-                return 0.95 + np.random.uniform(0, 0.05)
+                return min(1, 0.95 + np.random.uniform(0, 0.05))
             elif content_pref == 'like':
-                return 0.85 + np.random.uniform(0, 0.1)
+                return min(1, 0.85 + np.random.uniform(0, 0.1))
             elif content_pref == 'dislike':
                 return 0.1 + np.random.uniform(0, 0.15)
             elif content_pref == 'hate':
@@ -800,7 +800,7 @@ class LupeContentManager:
                     str(mid),
                     movie_info.get('title', 'Unknown'),
                     'movie',
-                    similarity + np.random.uniform(0, 0.1)  # Add small random factor
+                    max(0, min(1, similarity + np.random.uniform(0, 0.1)))  # Add small random factor with bounds
                 ))
             
             similarities.sort(key=lambda x: x[3], reverse=True)
@@ -846,7 +846,7 @@ class LupeContentManager:
                     str(sid),
                     show_info.get('title', 'Unknown'),
                     'tv',
-                    similarity + np.random.uniform(0, 0.1)  # Add small random factor
+                    max(0, min(1, similarity + np.random.uniform(0, 0.1)))  # Add small random factor with bounds
                 ))
             
             similarities.sort(key=lambda x: x[3], reverse=True)
