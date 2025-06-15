@@ -1,3 +1,7 @@
+# Variational Autoencoder Models for CineSync v2
+# Implements MultVAE and enhanced variants for collaborative filtering
+# Uses probabilistic latent representations for robust recommendations
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -7,31 +11,45 @@ import math
 
 
 class VariationalEncoder(nn.Module):
-    """Variational encoder for collaborative filtering"""
+    """Variational encoder for collaborative filtering
+    
+    Encodes user interaction patterns into probabilistic latent representations.
+    Uses reparameterization trick to enable backpropagation through stochastic
+    sampling, allowing the model to learn meaningful latent user preferences.
+    """
     
     def __init__(self, input_dim: int, hidden_dims: List[int], latent_dim: int, dropout: float = 0.5):
+        """Initialize variational encoder
+        
+        Args:
+            input_dim: Size of input layer (number of items)
+            hidden_dims: List of hidden layer sizes
+            latent_dim: Size of latent representation
+            dropout: Dropout rate for regularization
+        """
         super(VariationalEncoder, self).__init__()
         
         self.input_dim = input_dim
         self.latent_dim = latent_dim
         
-        # Encoder layers
+        # Build encoder layers with tanh activation and dropout
         encoder_layers = []
         prev_dim = input_dim
         
         for hidden_dim in hidden_dims:
             encoder_layers.extend([
-                nn.Linear(prev_dim, hidden_dim),
-                nn.Tanh(),
-                nn.Dropout(dropout)
+                nn.Linear(prev_dim, hidden_dim),  # Linear transformation
+                nn.Tanh(),                        # Non-linear activation
+                nn.Dropout(dropout)               # Regularization
             ])
             prev_dim = hidden_dim
         
+        # Combine all encoder layers into sequential model
         self.encoder = nn.Sequential(*encoder_layers)
         
-        # Latent space projections
-        self.mu_layer = nn.Linear(prev_dim, latent_dim)
-        self.logvar_layer = nn.Linear(prev_dim, latent_dim)
+        # Separate projections for mean and log-variance of latent distribution
+        self.mu_layer = nn.Linear(prev_dim, latent_dim)      # Mean of q(z|x)
+        self.logvar_layer = nn.Linear(prev_dim, latent_dim)  # Log-variance of q(z|x)
         
         self._init_weights()
     

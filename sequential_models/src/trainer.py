@@ -1,3 +1,7 @@
+# Sequential Recommendation Model Training and Evaluation
+# Specialized trainer for sequential models with proper handling of variable-length sequences
+# Includes comprehensive evaluation metrics for next-item prediction and ranking tasks
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -19,7 +23,16 @@ from .model import (
 
 class SequentialTrainer:
     """
-    Trainer class for sequential recommendation models with specialized evaluation metrics.
+    Specialized trainer for sequential recommendation models with proper sequence handling.
+    
+    Handles training and evaluation of various sequential architectures including:
+    - RNN-based models (LSTM/GRU)
+    - Attention-based models (SASRec-style)
+    - Hierarchical models (short/long-term)
+    - Session-based models
+    
+    Includes proper handling of variable-length sequences, causal masking for attention,
+    and specialized metrics for sequential recommendation evaluation.
     """
     
     def __init__(self, model: nn.Module, device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
@@ -36,15 +49,16 @@ class SequentialTrainer:
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
         
-        # Initialize optimizer and loss function
+        # Initialize optimizer with Adam (works well for sequential models)
         self.optimizer = optim.Adam(
             self.model.parameters(),
             lr=learning_rate,
-            weight_decay=weight_decay
+            weight_decay=weight_decay  # L2 regularization
         )
         
-        # Use cross-entropy loss for next-item prediction
-        self.criterion = nn.CrossEntropyLoss(ignore_index=0)  # Ignore padding
+        # Use cross-entropy loss for next-item prediction task
+        # ignore_index=0 ensures padding tokens don't contribute to loss
+        self.criterion = nn.CrossEntropyLoss(ignore_index=0)
         
         # Training history
         self.train_losses = []
@@ -60,14 +74,14 @@ class SequentialTrainer:
         self.patience_counter = 0
     
     def train_epoch(self, train_loader: DataLoader) -> float:
-        """Train for one epoch"""
+        """Train for one epoch with proper handling of different model types"""
         self.model.train()
         total_loss = 0.0
         num_batches = 0
         
         for batch in train_loader:
-            # Move data to device
-            if 'short_sequence' in batch:  # Hierarchical model
+            # Handle different model architectures with their specific input requirements
+            if 'short_sequence' in batch:  # Hierarchical model needs both short and long sequences
                 short_sequences = batch['short_sequence'].to(self.device)
                 long_sequences = batch['long_sequence'].to(self.device)
                 short_lengths = batch['short_length'].to(self.device)
@@ -85,15 +99,15 @@ class SequentialTrainer:
                 
                 self.optimizer.zero_grad()
                 
-                # Forward pass
+                # Forward pass with model-specific handling
                 if isinstance(self.model, AttentionalSequentialRecommender):
-                    # Create causal mask for self-attention
+                    # Create causal mask for self-attention (prevents looking at future items)
                     seq_len = sequences.size(1)
-                    mask = torch.tril(torch.ones(seq_len, seq_len, device=self.device))
+                    mask = torch.tril(torch.ones(seq_len, seq_len, device=self.device))  # Lower triangular mask
                     logits = self.model(sequences, mask)
-                    # Use the last position's prediction
+                    # Extract prediction from last valid position for each sequence
                     batch_size = logits.size(0)
-                    final_logits = logits[range(batch_size), lengths - 1]
+                    final_logits = logits[range(batch_size), lengths - 1]  # Use actual sequence lengths
                     loss = self.criterion(final_logits, targets)
                     
                 elif isinstance(self.model, SessionBasedRecommender):
@@ -107,10 +121,11 @@ class SequentialTrainer:
                     final_logits = logits[range(batch_size), lengths - 1]
                     loss = self.criterion(final_logits, targets)
             
-            # Backward pass
+            # Backward pass and optimization
             loss.backward()
             
-            # Gradient clipping for RNNs
+            # Gradient clipping prevents exploding gradients in RNNs
+            # Essential for stable training of sequential models
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
             
             self.optimizer.step()
@@ -121,7 +136,13 @@ class SequentialTrainer:
         return total_loss / num_batches
     
     def evaluate(self, val_loader: DataLoader, k_values: List[int] = [5, 10, 20]) -> Dict[str, float]:
-        """Evaluate model on validation data"""
+        """Evaluate model with comprehensive sequential recommendation metrics
+        
+        Computes standard metrics for next-item prediction task:
+        - Accuracy (top-1 prediction)
+        - Hit Rate@K (whether target is in top-K predictions)
+        - Loss (cross-entropy)
+        """
         self.model.eval()
         total_loss = 0.0
         correct_predictions = 0
@@ -174,10 +195,11 @@ class SequentialTrainer:
                 correct_predictions += (predicted_items == targets).sum().item()
                 total_predictions += targets.size(0)
                 
-                # Calculate hit rates
+                # Calculate hit rates (whether target item appears in top-K predictions)
                 _, top_k_items = torch.topk(predictions, max(k_values), dim=1)
                 
                 for k in k_values:
+                    # Check if target item is in top-k predictions for each sample
                     hits = (top_k_items[:, :k] == targets.unsqueeze(1)).any(dim=1).sum().item()
                     hit_counts[k] += hits
                 
@@ -304,7 +326,14 @@ class SequentialTrainer:
 
 class SequentialEvaluator:
     """
-    Comprehensive evaluator for sequential recommendation models.
+    Comprehensive evaluator for sequential recommendation models with advanced metrics.
+    
+    Provides detailed evaluation including:
+    - Next-item prediction metrics (Hit Rate, NDCG, MRR)
+    - Multi-step sequence prediction accuracy
+    - User behavior pattern analysis
+    
+    Used for thorough model assessment beyond basic training metrics.
     """
     
     def __init__(self, model: nn.Module, device: str = 'cuda' if torch.cuda.is_available() else 'cpu'):
@@ -315,7 +344,13 @@ class SequentialEvaluator:
     def evaluate_next_item_prediction(self, test_loader: DataLoader, 
                                     k_values: List[int] = [1, 5, 10, 20]) -> Dict[str, float]:
         """
-        Evaluate next-item prediction performance.
+        Comprehensive evaluation of next-item prediction with ranking metrics.
+        
+        Computes multiple ranking-based metrics:
+        - Hit Rate@K: Proportion of cases where target is in top-K
+        - NDCG@K: Normalized Discounted Cumulative Gain (position-aware)
+        - MRR: Mean Reciprocal Rank (harmonic mean of ranks)
+        - Accuracy: Simple top-1 prediction accuracy
         """
         metrics = {f'hit_rate@{k}': 0 for k in k_values}
         metrics.update({f'ndcg@{k}': 0 for k in k_values})
@@ -374,24 +409,27 @@ class SequentialEvaluator:
                     hits = (top_k_items[:, :k] == targets.unsqueeze(1)).any(dim=1)
                     metrics[f'hit_rate@{k}'] += hits.sum().item()
                     
-                    # NDCG
+                    # NDCG (Normalized Discounted Cumulative Gain)
+                    # Rewards correct predictions with higher weight for better positions
                     for i in range(batch_size):
                         target_item = targets[i].item()
                         top_k_list = top_k_items[i, :k].cpu().numpy()
                         
                         if target_item in top_k_list:
                             position = np.where(top_k_list == target_item)[0][0]
+                            # NDCG formula: 1 / log2(position + 2) - discounts lower positions
                             ndcg_score = 1.0 / math.log2(position + 2)  # +2 because log2(1) = 0
                             metrics[f'ndcg@{k}'] += ndcg_score
                 
-                # MRR (Mean Reciprocal Rank)
+                # MRR (Mean Reciprocal Rank) - harmonic mean of prediction ranks
+                # Higher weight for predictions ranked higher in the list
                 for i in range(batch_size):
                     target_item = targets[i].item()
                     top_k_list = top_k_items[i].cpu().numpy()
                     
                     if target_item in top_k_list:
                         position = np.where(top_k_list == target_item)[0][0]
-                        mrr_sum += 1.0 / (position + 1)
+                        mrr_sum += 1.0 / (position + 1)  # Reciprocal of rank (1-indexed)
         
         # Normalize metrics
         for k in k_values:
@@ -406,7 +444,14 @@ class SequentialEvaluator:
     def evaluate_sequence_prediction(self, test_loader: DataLoader, 
                                    future_steps: int = 5) -> Dict[str, float]:
         """
-        Evaluate multi-step sequence prediction accuracy.
+        Evaluate multi-step sequence prediction capability.
+        
+        Tests the model's ability to predict multiple future items in sequence,
+        which is useful for understanding how well the model captures longer-term
+        sequential patterns beyond just the immediate next item.
+        
+        Args:
+            future_steps: Number of future items to predict in sequence
         """
         total_samples = 0
         step_accuracies = {i: 0 for i in range(1, future_steps + 1)}
@@ -425,12 +470,12 @@ class SequentialEvaluator:
                     if seq_len < future_steps + 2:  # Need enough history
                         continue
                     
-                    # Use first part of sequence as input
+                    # Use first part of sequence as input, predict the rest
                     input_len = seq_len - future_steps
                     input_seq = seq[:input_len].unsqueeze(0)
                     
-                    # Predict next items step by step
-                    current_seq = input_seq.clone()
+                    # Predict next items step by step (autoregressive generation)
+                    current_seq = input_seq.clone()  # Start with initial sequence
                     
                     for step in range(1, future_steps + 1):
                         # Get prediction for next item

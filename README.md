@@ -327,17 +327,78 @@ async def recommend(ctx, content_type='mixed', count=5):
 - Model training and evaluation tools
 - Data export capabilities for analysis
 
-## 🚀 RTX 4090 Training Guide - All Models Verified
+## 🚀 RTX 4090 Training Guide - Enhanced Dataset Training
 
-### 🎯 **Confirmed RTX 4090 Compatibility**
+### 🎯 **RTX 4090 Optimized Training (NEW - All Datasets)**
 
-✅ **All 4 models verified to run on RTX 4090 (24GB VRAM)**
-- **Total Memory**: 1.61 GB for all models combined
-- **Individual Training**: All models fit comfortably
-- **Concurrent Training**: Can run 2-3 models simultaneously
-- **Memory Efficiency**: Uses only 6.7% of available VRAM
+✅ **Enhanced training with 150M+ ratings on RTX 4090 (24GB VRAM)**
+- **Full Dataset**: All movies, TV shows, anime, reviews, streaming data
+- **Memory Efficient**: Optimized for 4090's 24GB VRAM
+- **Auto-Detection**: Automatically optimizes settings for your GPU
+- **Mixed Precision**: Reduces memory usage by ~50%
 
-### 🏋️ **Training Instructions (RTX 4090 Optimized)**
+### 🚀 **Quick Start Commands (RTX 4090)**
+
+#### **Option 1: Auto-Optimized Training (Recommended)**
+```bash
+# Automatically detects RTX 4090 and optimizes settings
+python train_4090_optimized.py
+```
+**Memory**: ~4.0GB | **Training Time**: ~3-4 hours | **All Datasets**
+
+#### **Option 2: Full Dataset Training (Manual)**
+```bash
+# Optimized for 4090 - uses all datasets with memory optimizations
+python enhanced_training.py \
+    --embedding_dim 64 \
+    --hidden_dim 128 \
+    --batch_size 256 \
+    --learning_rate 0.001 \
+    --epochs 25 \
+    --patience 6 \
+    --use_cuda
+```
+**Memory**: ~4.0GB | **Safe for 4090** | **150M+ Ratings**
+
+#### **Option 3: High-Performance Training**
+```bash
+# Larger model with mixed precision for maximum quality
+python enhanced_training.py \
+    --embedding_dim 128 \
+    --hidden_dim 256 \
+    --batch_size 128 \
+    --learning_rate 0.0005 \
+    --epochs 30 \
+    --patience 8 \
+    --use_cuda \
+    --use_mixed_precision
+```
+**Memory**: ~7.3GB | **High Quality** | **All Datasets**
+
+#### **Option 4: Conservative Training**
+```bash
+# Guaranteed to fit on any 4090
+python enhanced_training.py \
+    --embedding_dim 32 \
+    --hidden_dim 64 \
+    --batch_size 512 \
+    --learning_rate 0.002 \
+    --epochs 40 \
+    --patience 10 \
+    --use_cuda
+```
+**Memory**: ~2.0GB | **Very Safe** | **Fast Training**
+
+### 📊 **Memory Usage Comparison**
+
+| Training Option | Model Size | Batch Memory | Total VRAM | Status | Datasets |
+|----------------|------------|--------------|------------|---------|----------|
+| Auto-Optimized | ~1.2GB | ~2.8GB | ~4.0GB | ✅ **Recommended** | All 150M+ |
+| High-Performance | ~2.1GB | ~5.2GB | ~7.3GB | ✅ **Max Quality** | All 150M+ |
+| Conservative | ~0.6GB | ~1.4GB | ~2.0GB | ✅ **Very Safe** | All 150M+ |
+| Legacy Models | ~0.3GB | ~0.8GB | ~1.1GB | ✅ **Individual** | 32M only |
+
+### 🏋️ **Legacy Model Training (Individual Datasets)**
 
 #### 1. Enhanced Two-Tower Model
 ```bash
@@ -798,28 +859,43 @@ The simplified version is perfect for getting started, learning, and basic use c
 
 ## 📊 Dataset Information
 
-### 🎯 CineSync Complete Training Dataset
+### 🎯 CineSync Enhanced Training Dataset Collection
 
-This project uses a comprehensive multi-modal dataset containing **130M+ ratings** across movies, TV shows, anime, and actor data. The dataset includes:
+This project now uses an **extensive multi-modal dataset containing 150M+ ratings** across movies, TV shows, anime, streaming platforms, and professional reviews. The comprehensive dataset includes:
 
 **🎬 Movie Datasets:**
 - **MovieLens 32M** (229MB) - 32M+ ratings from 280K users on 87K movies
 - **Netflix Prize Archive** (664MB) - Historic 100M+ ratings from $1M competition  
+- **TMDB Movies Complete** (840MB) - Full movie metadata with cast, crew, keywords
 - **TMDB Actor Data** (502MB) - Complete filmography and career information
-- **Additional Movie Data** (1.4GB) - Supplementary training datasets
+- **Rotten Tomatoes** (47MB) - Professional critic reviews and audience scores
+- **Metacritic Movies** (15MB) - Professional critic scores and reviews
+- **Box Office Mojo** (12MB) - Financial performance and box office data
+- **HetRec MovieLens** (2MB) - Enhanced MovieLens with social tags and locations
+- **Streaming Platforms** (8MB) - Content availability across Netflix, Prime, Hulu, Disney+
 
-**📺 TV Show Datasets:**
-- **TMDB TV Shows** (32MB) - 150K TV shows with comprehensive metadata
-- **MyAnimeList** (227MB) - Anime ratings and reviews from community
-- **IMDb TV Series** (28MB) - TV series organized by 22+ genres
-- **Netflix TV Catalog** (1.4MB) - Netflix content metadata
+**📺 TV Show & Anime Datasets:**
+- **TMDB TV Shows** (387MB) - 150K+ TV shows with comprehensive metadata
+- **MyAnimeList Complete** (227MB) - 300K users, 80M+ anime ratings and reviews
+- **IMDb TV Series by Genre** (156MB) - 23 genre-categorized TV series datasets
+- **Netflix TV Catalog** (5MB) - Netflix TV show metadata and availability
+- **Amazon Prime TV** (3MB) - Prime Video TV show catalog
+- **Disney+ TV** (2MB) - Disney+ series and shows metadata
+- **Metacritic TV** (8MB) - Professional TV show reviews and scores
 
-**📈 Key Statistics:**
-- **Total Size**: ~7GB compressed, ~15GB+ extracted
-- **Ratings**: 130M+ explicit ratings across all sources
-- **Content**: 87K+ movies, 150K+ TV shows, comprehensive actor data
-- **Time Span**: 1995-2023 (28 years of rating data)
-- **Quality**: Research-grade datasets used in academic papers
+**🎭 Professional Review & Rating Data:**
+- **IMDb Complete** (2.1GB uncompressed) - Title basics, ratings, crew, episodes, cast
+- **Rotten Tomatoes Critics** (47MB) - Professional critic reviews and ratings
+- **Metacritic Cross-Platform** (23MB) - Movies, TV, games professional scores
+
+**📈 Enhanced Key Statistics:**
+- **Total Size**: ~12GB compressed, ~25GB+ extracted
+- **Ratings**: 150M+ explicit ratings across all sources
+- **Content**: 90K+ movies, 180K+ TV shows, 15K+ anime titles
+- **Professional Reviews**: 500K+ critic reviews from major publications
+- **Time Span**: 1995-2024 (29 years of comprehensive rating data)
+- **Platforms**: 8+ streaming platform catalogs included
+- **Quality**: Research-grade datasets used in academic papers and industry
 
 ### 🚀 Dataset Setup Options
 
@@ -859,26 +935,62 @@ unzip ml-32m.zip
 # Download from: [MyAnimeList Dataset on Kaggle]
 ```
 
-### 📁 Expected Folder Structure
+### 📁 Complete Dataset Folder Structure
 
-After setup, your project should have:
+After extraction and organization, your project contains:
 ```
 cine-sync-v2/
-├── ml-32m/                    # MovieLens 32M dataset
-│   ├── ratings.csv            # 32M+ user ratings
-│   ├── movies.csv             # Movie metadata
-│   ├── tags.csv               # User-generated tags
-│   └── links.csv              # IMDB/TMDB cross-references
-├── archive/                   # Netflix Prize historic data
-│   ├── combined_data_*.txt    # 100M+ Netflix ratings
-│   └── movie_titles.csv       # Netflix movie catalog
-├── tmdb/                      # TMDB actor and movie data
+├── movies/                    # Movie datasets organized by source
+│   ├── cinesync/             # Core CineSync training data
+│   │   ├── ml-32m/           # MovieLens 32M dataset
+│   │   │   ├── ratings.csv   # 32M+ user ratings
+│   │   │   ├── movies.csv    # Movie metadata
+│   │   │   ├── tags.csv      # User-generated tags
+│   │   │   └── links.csv     # IMDB/TMDB cross-references
+│   │   └── archive/          # Netflix Prize historic data
+│   │       ├── combined_data_*.txt # 100M+ Netflix ratings
+│   │       └── movie_titles.csv    # Netflix movie catalog
+│   ├── tmdb-movies/          # TMDB movie metadata
+│   │   ├── movies_metadata.csv # Complete movie metadata
+│   │   ├── credits.csv       # Cast and crew information
+│   │   ├── keywords.csv      # Movie keywords and tags
+│   │   └── ratings.csv       # User ratings
+│   ├── amazon/               # Amazon Prime movie catalog
+│   ├── disney/               # Disney+ movie catalog
+│   ├── boxoffice/            # Box Office Mojo financial data
+│   ├── metacritic/           # Metacritic professional reviews
+│   ├── rotten/               # Rotten Tomatoes critic reviews
+│   ├── streaming/            # Multi-platform availability data
+│   ├── recommendation/       # Additional recommendation datasets
+│   └── hetrec/               # Enhanced MovieLens with social data
+├── tv/                       # TV show and anime datasets
+│   ├── tmdb/                 # TMDB TV show metadata
+│   │   └── TMDB_tv_dataset_v3.csv # 150K+ TV shows
+│   ├── anime/                # MyAnimeList anime data
+│   │   ├── animes.csv        # Anime metadata
+│   │   ├── profiles.csv      # User profiles
+│   │   └── reviews.csv       # User reviews and ratings
+│   ├── imdb/                 # IMDb TV series by genre
+│   │   ├── action_series.csv # Action TV series
+│   │   ├── drama_series.csv  # Drama TV series
+│   │   └── [21 more genre files] # Complete genre collection
+│   ├── netflix/              # Netflix TV catalog
+│   └── misc/                 # Additional TV datasets
+├── imdb/                     # Complete IMDb datasets (2.1GB)
+│   ├── title.basics.tsv      # Basic title information
+│   ├── title.ratings.tsv     # IMDb ratings
+│   ├── title.crew.tsv        # Directors and writers
+│   ├── title.episode.tsv     # TV episode information
+│   ├── title.principals.tsv  # Cast and crew details
+│   ├── title.akas.tsv        # Alternative titles
+│   └── name.basics.tsv       # Person information
+├── tmdb/                     # TMDB actor and filmography data
 │   ├── actor_filmography_data.csv
 │   └── actor_filmography_data_*.csv
-├── tv/                        # TV show datasets
-│   ├── *.zip                  # Compressed TV datasets
-│   └── netflix_tv_shows.csv   # Netflix TV catalog
-└── models/                    # Trained models (created during training)
+└── models/                   # Trained models (created during training)
+    ├── best_model.pt         # Main recommendation model
+    ├── best_tv_model.pt      # TV show specialized model
+    └── metadata files...     # Model configuration and mappings
 ```
 
 ## 📋 Installation & Setup

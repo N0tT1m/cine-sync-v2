@@ -1,3 +1,7 @@
+# Graph Neural Network Models for CineSync v2
+# Implements LightGCN and enhanced GNN variants for collaborative filtering
+# Optimized for large-scale recommendation with bipartite user-item graphs
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -10,10 +14,16 @@ from torch_sparse import SparseTensor
 
 
 class LightGCNConv(MessagePassing):
-    """Light Graph Convolutional Network layer"""
+    """Light Graph Convolutional Network layer
+    
+    Simplified graph convolution that removes feature transformation and
+    non-linear activation to focus purely on neighborhood aggregation.
+    More effective for collaborative filtering than standard GCN.
+    """
     
     def __init__(self, **kwargs):
-        super(LightGCNConv, self).__init__(aggr='add', **kwargs)
+        """Initialize LightGCN convolution with additive aggregation"""
+        super(LightGCNConv, self).__init__(aggr='add', **kwargs)  # Sum aggregation
     
     def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
         """
@@ -26,19 +36,28 @@ class LightGCNConv(MessagePassing):
         Returns:
             Updated node features
         """
-        # Compute normalization
+        # Compute symmetric normalization: D^(-1/2) A D^(-1/2)
+        # This normalizes by node degrees to prevent high-degree nodes from dominating
         row, col = edge_index
-        deg = degree(col, x.size(0), dtype=x.dtype)
-        deg_inv_sqrt = deg.pow(-0.5)
-        deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
-        norm = deg_inv_sqrt[row] * deg_inv_sqrt[col]
+        deg = degree(col, x.size(0), dtype=x.dtype)  # Node degrees
+        deg_inv_sqrt = deg.pow(-0.5)                 # D^(-1/2)
+        deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0  # Handle isolated nodes
+        norm = deg_inv_sqrt[row] * deg_inv_sqrt[col]    # Normalization coefficients
         
-        # Propagate messages
+        # Propagate messages through the graph with normalization
         return self.propagate(edge_index, x=x, norm=norm)
     
     def message(self, x_j: torch.Tensor, norm: torch.Tensor) -> torch.Tensor:
-        """Message function"""
-        return norm.view(-1, 1) * x_j
+        """Message function: normalize neighbor features by edge weights
+        
+        Args:
+            x_j: Neighbor node features [num_edges, embedding_dim]
+            norm: Normalization coefficients [num_edges]
+            
+        Returns:
+            Normalized messages from neighbors
+        """
+        return norm.view(-1, 1) * x_j  # Apply normalization to neighbor features
 
 
 class LightGCN(nn.Module):

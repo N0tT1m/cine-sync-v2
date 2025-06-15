@@ -1,3 +1,7 @@
+# Two-Tower Model Data Loading and Feature Engineering
+# Comprehensive data pipeline for two-tower recommendation models
+# Handles both categorical and numerical features with sophisticated engineering
+
 import torch
 from torch.utils.data import Dataset, DataLoader
 import pandas as pd
@@ -12,7 +16,11 @@ from collections import defaultdict
 
 class TwoTowerDataset(Dataset):
     """
-    Dataset for Two-Tower models with rich feature support.
+    PyTorch Dataset for basic Two-Tower models with user and item features.
+    
+    Handles simple feature vectors for users and items, suitable for
+    the basic TwoTowerModel architecture. Features are expected to be
+    pre-processed into dense numerical vectors.
     """
     
     def __init__(self, user_features: torch.Tensor, item_features: torch.Tensor,
@@ -32,7 +40,8 @@ class TwoTowerDataset(Dataset):
         self.user_ids = user_ids
         self.item_ids = item_ids
         
-        assert len(user_features) == len(item_features) == len(ratings)
+        # Ensure all feature tensors have consistent sample counts
+        assert len(user_features) == len(item_features) == len(ratings), "Feature tensors must have same length"
     
     def __len__(self):
         return len(self.ratings)
@@ -54,7 +63,11 @@ class TwoTowerDataset(Dataset):
 
 class EnhancedTwoTowerDataset(Dataset):
     """
-    Dataset for Enhanced Two-Tower models with categorical and numerical features.
+    Advanced PyTorch Dataset for Enhanced Two-Tower models with mixed feature types.
+    
+    Supports both categorical and numerical features separately, enabling
+    the model to apply different processing strategies (embeddings vs. linear layers).
+    This design is more flexible and typically leads to better performance.
     """
     
     def __init__(self, user_categorical: Dict[str, torch.Tensor], 
@@ -74,11 +87,12 @@ class EnhancedTwoTowerDataset(Dataset):
         self.item_numerical = item_numerical
         self.ratings = ratings
         
-        # Validate lengths
+        # Validate that all feature tensors have consistent sample counts
+        # This is critical for proper batch formation during training
         first_user_cat = list(user_categorical.values())[0] if user_categorical else None
         first_item_cat = list(item_categorical.values())[0] if item_categorical else None
         
-        lengths = [len(ratings)]
+        lengths = [len(ratings)]  # Base length from target variable
         if first_user_cat is not None:
             lengths.append(len(first_user_cat))
         if user_numerical is not None:
@@ -88,7 +102,7 @@ class EnhancedTwoTowerDataset(Dataset):
         if item_numerical is not None:
             lengths.append(len(item_numerical))
         
-        assert all(l == lengths[0] for l in lengths), "All features must have same length"
+        assert all(l == lengths[0] for l in lengths), "All feature tensors must have identical length"
     
     def __len__(self):
         return len(self.ratings)
@@ -106,7 +120,15 @@ class EnhancedTwoTowerDataset(Dataset):
 
 class TwoTowerDataLoader:
     """
-    Comprehensive data loader for Two-Tower models with feature engineering capabilities.
+    Comprehensive data preprocessing pipeline for Two-Tower recommendation models.
+    
+    Handles the complete data flow from raw CSV files to PyTorch DataLoaders:
+    - Feature engineering from rating patterns and metadata
+    - User preference profiling based on genre interactions
+    - Item popularity and content features
+    - Categorical/numerical feature separation and encoding
+    - Negative sampling for implicit feedback scenarios
+    - Train/validation/test splitting with proper data leakage prevention
     """
     
     def __init__(self, ratings_path: str, movies_path: Optional[str] = None,
@@ -123,11 +145,11 @@ class TwoTowerDataLoader:
         
         self.logger = logging.getLogger(__name__)
         
-        # Initialize encoders and scalers
-        self.user_encoder = LabelEncoder()
-        self.item_encoder = LabelEncoder()
-        self.genre_encoders = {}
-        self.scalers = {}
+        # Initialize preprocessing components
+        self.user_encoder = LabelEncoder()      # Maps user IDs to contiguous indices
+        self.item_encoder = LabelEncoder()      # Maps item IDs to contiguous indices  
+        self.genre_encoders = {}                # Label encoders for categorical features
+        self.scalers = {}                       # Standard scalers for numerical features
         
         # Load and process data
         self._load_data()
@@ -149,15 +171,21 @@ class TwoTowerDataLoader:
         self._filter_data()
     
     def _filter_data(self):
-        """Filter data by minimum interactions"""
+        """Filter sparse users and items to improve data quality
+        
+        Removes users and items with too few interactions, which:
+        - Reduces noise from unreliable preference signals
+        - Improves training stability and convergence
+        - Focuses the model on users/items with sufficient data
+        """
         original_size = len(self.ratings_df)
         
-        # Filter users
+        # Filter out sparse users (cold start problem)
         user_counts = self.ratings_df['userId'].value_counts()
         valid_users = user_counts[user_counts >= self.min_interactions].index
         self.ratings_df = self.ratings_df[self.ratings_df['userId'].isin(valid_users)]
         
-        # Filter items
+        # Filter out sparse items (long tail problem)
         item_counts = self.ratings_df['movieId'].value_counts()
         valid_items = item_counts[item_counts >= self.min_interactions].index
         self.ratings_df = self.ratings_df[self.ratings_df['movieId'].isin(valid_items)]
@@ -177,23 +205,31 @@ class TwoTowerDataLoader:
         self._create_item_features()
     
     def _create_user_features(self):
-        """Create user features from rating history"""
+        """Engineer user features from historical rating patterns
+        
+        Creates behavioral features that capture user preferences and engagement:
+        - Rating statistics (mean, std, count)
+        - Temporal activity patterns
+        - Engagement metrics (frequency, consistency)
+        - Preference diversity indicators
+        """
+        # Aggregate user rating statistics to capture preference patterns
         user_stats = self.ratings_df.groupby('userId').agg({
-            'rating': ['mean', 'std', 'count'],
-            'timestamp': ['min', 'max']
+            'rating': ['mean', 'std', 'count'],      # Rating behavior
+            'timestamp': ['min', 'max']              # Temporal activity
         }).round(4)
         
         # Flatten column names
         user_stats.columns = ['_'.join(col) for col in user_stats.columns]
         user_stats = user_stats.reset_index()
         
-        # Handle missing values
+        # Handle missing values (users with single rating have no std)
         user_stats['rating_std'] = user_stats['rating_std'].fillna(0)
         
-        # Create additional features
-        user_stats['rating_range'] = user_stats['rating_std'] > 1.0  # High variance users
-        user_stats['activity_days'] = (user_stats['timestamp_max'] - user_stats['timestamp_min']) / (24 * 3600)
-        user_stats['rating_frequency'] = user_stats['rating_count'] / (user_stats['activity_days'] + 1)
+        # Engineer behavioral features from basic statistics
+        user_stats['rating_range'] = user_stats['rating_std'] > 1.0    # Binary: diverse vs. consistent raters
+        user_stats['activity_days'] = (user_stats['timestamp_max'] - user_stats['timestamp_min']) / (24 * 3600)  # Days active
+        user_stats['rating_frequency'] = user_stats['rating_count'] / (user_stats['activity_days'] + 1)          # Ratings per day
         
         # Create genre preferences if movies data available
         if self.movies_df is not None:
@@ -202,7 +238,12 @@ class TwoTowerDataLoader:
         self.user_features_df = user_stats
     
     def _create_user_genre_preferences(self, user_stats: pd.DataFrame):
-        """Create user genre preference features"""
+        """Engineer user genre preference features from rating history
+        
+        Analyzes user's rating patterns across different genres to create
+        preference profiles. This captures content-based user preferences
+        that can improve recommendations, especially for cold-start scenarios.
+        """
         # Merge ratings with movie genres
         ratings_with_genres = self.ratings_df.merge(
             self.movies_df[['movieId', 'genres']], on='movieId', how='left'
@@ -216,29 +257,34 @@ class TwoTowerDataLoader:
         
         all_genres = sorted(list(all_genres))
         
-        # Calculate user preferences for each genre
+        # Calculate user preferences for each genre based on rating patterns
+        # Higher ratings = stronger preference for that genre
         genre_preferences = defaultdict(lambda: defaultdict(float))
         
         for _, row in ratings_with_genres.iterrows():
             user_id = row['userId']
-            rating = row['rating']
-            genres_str = row['genres']
+            rating = row['rating']      # User's rating for this movie
+            genres_str = row['genres']  # Pipe-separated genre string
             
             if pd.notna(genres_str):
-                genres = genres_str.split('|')
+                genres = genres_str.split('|')  # Split 'Action|Adventure|Sci-Fi'
                 for genre in genres:
                     if genre in all_genres:
+                        # Accumulate rating for each genre
                         genre_preferences[user_id][genre] += rating
         
-        # Normalize by number of ratings per genre
+        # Normalize by number of ratings per genre to get average preference
+        # This prevents bias toward genres with more rated movies
         for user_id in genre_preferences:
             user_genre_counts = defaultdict(int)
+            # Count how many movies of each genre this user has rated
             for _, row in ratings_with_genres[ratings_with_genres['userId'] == user_id].iterrows():
                 if pd.notna(row['genres']):
                     for genre in row['genres'].split('|'):
                         if genre in all_genres:
                             user_genre_counts[genre] += 1
             
+            # Convert total rating to average rating per genre
             for genre in genre_preferences[user_id]:
                 if user_genre_counts[genre] > 0:
                     genre_preferences[user_id][genre] /= user_genre_counts[genre]
@@ -251,11 +297,18 @@ class TwoTowerDataLoader:
             )
     
     def _create_item_features(self):
-        """Create item features from ratings and metadata"""
-        # Basic item statistics from ratings
+        """Engineer item features from rating statistics and metadata
+        
+        Creates comprehensive item profiles combining:
+        - Popularity metrics from user ratings
+        - Content features from metadata (year, genres)
+        - Quality indicators (average rating, consistency)
+        - Temporal patterns (when first/last rated)
+        """
+        # Basic item popularity and quality statistics from user ratings
         item_stats = self.ratings_df.groupby('movieId').agg({
-            'rating': ['mean', 'std', 'count'],
-            'timestamp': ['min', 'max']
+            'rating': ['mean', 'std', 'count'],   # Quality and popularity metrics
+            'timestamp': ['min', 'max']           # When first/last rated
         }).round(4)
         
         item_stats.columns = ['_'.join(col) for col in item_stats.columns]
@@ -270,10 +323,10 @@ class TwoTowerDataLoader:
                 on='movieId', how='left'
             )
             
-            # Extract year from title
-            item_stats['year'] = item_stats['title'].str.extract(r'\((\d{4})\)')
-            item_stats['year'] = pd.to_numeric(item_stats['year'], errors='coerce')
-            item_stats['year'] = item_stats['year'].fillna(item_stats['year'].median())
+            # Extract release year from movie titles (MovieLens format: "Title (Year)")
+            item_stats['year'] = item_stats['title'].str.extract(r'\((\d{4})\)')  # Regex to extract 4-digit year
+            item_stats['year'] = pd.to_numeric(item_stats['year'], errors='coerce')  # Convert to numeric
+            item_stats['year'] = item_stats['year'].fillna(item_stats['year'].median())  # Fill missing with median
             
             # Process genres
             self._process_item_genres(item_stats)
@@ -281,7 +334,12 @@ class TwoTowerDataLoader:
         self.item_features_df = item_stats
     
     def _process_item_genres(self, item_stats: pd.DataFrame):
-        """Process item genre features"""
+        """Process item genre information into model features
+        
+        Converts pipe-separated genre strings into binary feature vectors
+        and additional genre-based statistics. This enables the model to
+        learn content-based item similarities and preferences.
+        """
         # Get all unique genres
         all_genres = set()
         for genres_str in item_stats['genres'].dropna():
@@ -290,21 +348,27 @@ class TwoTowerDataLoader:
         
         all_genres = sorted(list(all_genres))
         
-        # Create binary genre features
+        # Create binary genre features (one-hot encoding)
+        # Each genre becomes a separate binary feature column
         for genre in all_genres:
             genre_col = f'genre_{genre.lower().replace("-", "_")}'
             item_stats[genre_col] = item_stats['genres'].apply(
                 lambda x: 1 if pd.notna(x) and genre in x.split('|') else 0
             )
         
-        # Count total genres per movie
+        # Count total genres per movie (genre diversity feature)
+        # Movies with more genres might appeal to broader audiences
         item_stats['num_genres'] = item_stats['genres'].apply(
             lambda x: len(x.split('|')) if pd.notna(x) else 0
         )
     
     def _fit_encoders(self):
-        """Fit encoders and scalers on features"""
-        # Encode user and item IDs
+        """Fit all preprocessing components on the training data
+        
+        Creates mappings and scaling parameters that will be applied consistently
+        across train/validation/test splits to prevent data leakage.
+        """
+        # Encode user and item IDs to contiguous indices for embedding layers
         self.user_encoder.fit(self.ratings_df['userId'].unique())
         self.item_encoder.fit(self.ratings_df['movieId'].unique())
         
@@ -314,16 +378,18 @@ class TwoTowerDataLoader:
         self.item_numerical_cols = []
         self.item_categorical_cols = []
         
-        # User features
+        # Classify user features as numerical or categorical based on data type and cardinality
         for col in self.user_features_df.columns:
             if col == 'userId':
-                continue
+                continue  # Skip ID column
             elif self.user_features_df[col].dtype in ['int64', 'float64']:
-                if self.user_features_df[col].nunique() <= 10:  # Treat as categorical
+                # Numeric columns with low cardinality are treated as categorical
+                if self.user_features_df[col].nunique() <= 10:
                     self.user_categorical_cols.append(col)
                 else:
                     self.user_numerical_cols.append(col)
             else:
+                # Non-numeric columns are categorical
                 self.user_categorical_cols.append(col)
         
         # Item features
@@ -338,7 +404,8 @@ class TwoTowerDataLoader:
             else:
                 self.item_categorical_cols.append(col)
         
-        # Fit scalers for numerical features
+        # Fit scalers for numerical features (standardization to mean=0, std=1)
+        # This ensures all numerical features have similar scales for stable training
         if self.user_numerical_cols:
             self.scalers['user_numerical'] = StandardScaler()
             self.scalers['user_numerical'].fit(self.user_features_df[self.user_numerical_cols])
@@ -347,10 +414,11 @@ class TwoTowerDataLoader:
             self.scalers['item_numerical'] = StandardScaler()
             self.scalers['item_numerical'].fit(self.item_features_df[self.item_numerical_cols])
         
-        # Fit encoders for categorical features
+        # Fit label encoders for categorical features
+        # Each categorical feature gets mapped to contiguous integers for embedding layers
         for col in self.user_categorical_cols:
             encoder = LabelEncoder()
-            encoder.fit(self.user_features_df[col].astype(str))
+            encoder.fit(self.user_features_df[col].astype(str))  # Convert to string to handle mixed types
             self.genre_encoders[f'user_{col}'] = encoder
         
         for col in self.item_categorical_cols:
@@ -409,32 +477,41 @@ class TwoTowerDataLoader:
         return train_features, val_features, test_features
     
     def _add_negative_samples(self, data: pd.DataFrame, neg_ratio: float) -> pd.DataFrame:
-        """Add negative samples for training"""
-        # Get all user-item pairs that exist (positive samples)
+        """Add negative samples for implicit feedback training
+        
+        For recommendation systems, we often need negative examples to train
+        the model to distinguish between relevant and irrelevant items.
+        This function generates random user-item pairs that don't exist in
+        the positive interaction data.
+        """
+        # Identify existing user-item interactions (positive samples)
         positive_pairs = set(zip(data['userId'], data['movieId']))
         
-        # Get all possible users and items
+        # Get vocabulary of all users and items for negative sampling
         all_users = data['userId'].unique()
         all_items = data['movieId'].unique()
         
-        # Generate negative samples
+        # Generate negative samples by random sampling
         negative_samples = []
-        num_negatives = int(len(data) * neg_ratio)
+        num_negatives = int(len(data) * neg_ratio)  # Total negative samples to generate
         
+        # Randomly sample user-item pairs that don't exist in positive data
         while len(negative_samples) < num_negatives:
             user = np.random.choice(all_users)
             item = np.random.choice(all_items)
             
+            # Only use pairs that don't exist in positive interactions
             if (user, item) not in positive_pairs:
-                # Get user and item features
+                # Retrieve pre-computed features for this user and item
                 user_features = self.user_features_df[self.user_features_df['userId'] == user].iloc[0]
                 item_features = self.item_features_df[self.item_features_df['movieId'] == item].iloc[0]
                 
+                # Create negative sample with rating=0 (negative label)
                 negative_sample = {
                     'userId': user,
                     'movieId': item,
-                    'rating': 0.0,  # Negative label
-                    'timestamp': 0
+                    'rating': 0.0,  # Label as negative interaction
+                    'timestamp': 0   # Dummy timestamp
                 }
                 
                 # Add user features

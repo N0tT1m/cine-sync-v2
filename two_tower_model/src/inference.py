@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """
-Inference script for Two-Tower/Dual-Encoder models.
+Production-Ready Inference Engine for Two-Tower/Dual-Encoder Models
+
+Provides efficient inference capabilities for all two-tower architectures:
+- Real-time user-item score prediction
+- Scalable user recommendation generation using FAISS
+- Item-to-item similarity search
+- Batch prediction for bulk processing
+
+Optimized for production deployment with pre-computed item embeddings
+and efficient similarity search using Facebook AI Similarity Search (FAISS).
 """
 
 import torch
@@ -21,7 +30,20 @@ from model import (
 
 class TwoTowerInference:
     """
-    Inference class for Two-Tower models with efficient similarity search.
+    Production-ready inference engine for trained Two-Tower recommendation models.
+    
+    Provides comprehensive inference capabilities:
+    - Model loading and reconstruction from checkpoints
+    - Feature preprocessing using saved encoders and scalers
+    - Efficient similarity search with FAISS indexing
+    - Support for all model variants (basic, enhanced, multi-task, collaborative)
+    - Scalable recommendation generation for production workloads
+    
+    Design principles:
+    - Pre-compute item embeddings for fast retrieval
+    - Use FAISS for approximate nearest neighbor search
+    - Maintain consistency with training-time preprocessing
+    - Support batch operations for efficiency
     """
     
     def __init__(self, model_path: str, preprocessors_path: str, device: str = 'auto'):
@@ -33,16 +55,17 @@ class TwoTowerInference:
         """
         self.device = device if device != 'auto' else ('cuda' if torch.cuda.is_available() else 'cpu')
         
-        # Load preprocessors
+        # Load all preprocessing components saved from training
+        # These maintain the same transformations used during training
         with open(preprocessors_path, 'rb') as f:
             self.preprocessors = pickle.load(f)
         
-        self.user_encoder = self.preprocessors['user_encoder']
-        self.item_encoder = self.preprocessors['item_encoder']
-        self.genre_encoders = self.preprocessors['genre_encoders']
-        self.scalers = self.preprocessors['scalers']
-        self.user_features_df = self.preprocessors['user_features_df']
-        self.item_features_df = self.preprocessors['item_features_df']
+        self.user_encoder = self.preprocessors['user_encoder']        # User ID encoding
+        self.item_encoder = self.preprocessors['item_encoder']        # Item ID encoding
+        self.genre_encoders = self.preprocessors['genre_encoders']    # Categorical feature encoders
+        self.scalers = self.preprocessors['scalers']                  # Numerical feature scalers
+        self.user_features_df = self.preprocessors['user_features_df'] # Pre-computed user features
+        self.item_features_df = self.preprocessors['item_features_df'] # Pre-computed item features
         
         # Feature column information
         self.user_numerical_cols = self.preprocessors['user_numerical_cols']
@@ -53,26 +76,32 @@ class TwoTowerInference:
         # Load model
         self._load_model(model_path)
         
-        # Initialize item index for efficient retrieval
-        self.item_index = None
-        self.item_embeddings_cache = None
+        # Initialize FAISS index for efficient similarity search
+        self.item_index = None                # FAISS index for item embeddings
+        self.item_embeddings_cache = None     # Cache of all item embeddings
+        self.indexed_items = None             # Mapping from index position to item ID
         
         self.logger = logging.getLogger(__name__)
     
     def _load_model(self, model_path: str):
-        """Load trained model"""
+        """Load trained model and reconstruct architecture from checkpoint
+        
+        Automatically detects model type and recreates the exact architecture
+        used during training, then loads the trained weights.
+        """
         checkpoint = torch.load(model_path, map_location=self.device)
         
-        # Get model configuration
+        # Extract model configuration from training checkpoint
         model_config = checkpoint.get('model_config', {})
         model_class = model_config.get('model_class', 'TwoTowerModel')
         
-        # Create model based on class
+        # Reconstruct model architecture based on saved configuration
         if model_class == 'EnhancedTwoTowerModel':
-            # Get categorical dimensions
+            # Enhanced model needs categorical vocabulary sizes for embedding layers
             user_cat_dims = {}
             item_cat_dims = {}
             
+            # Extract vocabulary sizes from saved encoders
             for col in self.user_categorical_cols:
                 user_cat_dims[col] = len(self.genre_encoders[f'user_{col}'].classes_)
             for col in self.item_categorical_cols:
@@ -126,25 +155,31 @@ class TwoTowerInference:
         self.logger.info(f"Loaded {model_class} model on {self.device}")
     
     def _process_user_features(self, user_id: int) -> Dict[str, torch.Tensor]:
-        """Process user features for model input"""
-        # Get user features
+        """Process user features for model input using training-time preprocessing
+        
+        Applies the same feature engineering and encoding used during training
+        to ensure consistency between training and inference.
+        """
+        # Retrieve pre-computed user features
         try:
             user_row = self.user_features_df[self.user_features_df['userId'] == user_id].iloc[0]
         except (IndexError, KeyError):
-            self.logger.warning(f"User {user_id} not found in features")
+            self.logger.warning(f"User {user_id} not found in feature database")
             return None
         
-        # Process numerical features
+        # Process numerical features with training-time scaling
         user_numerical = None
         if self.user_numerical_cols:
             numerical_values = user_row[self.user_numerical_cols].values.reshape(1, -1)
             if 'user_numerical' in self.scalers:
+                # Apply same standardization used during training
                 numerical_values = self.scalers['user_numerical'].transform(numerical_values)
             user_numerical = torch.FloatTensor(numerical_values)
         
-        # Process categorical features
+        # Process categorical features with training-time encoding
         user_categorical = {}
         for col in self.user_categorical_cols:
+            # Apply same label encoding used during training
             encoded_value = self.genre_encoders[f'user_{col}'].transform([str(user_row[col])])[0]
             user_categorical[col] = torch.LongTensor([encoded_value])
         
@@ -183,14 +218,19 @@ class TwoTowerInference:
     
     def predict_user_item_score(self, user_id: int, item_id: int) -> float:
         """
-        Predict score for a user-item pair.
+        Predict relevance score for a specific user-item pair.
+        
+        This method is useful for:
+        - A/B testing specific recommendations
+        - Explaining recommendation scores
+        - Filtering candidates by minimum score threshold
         
         Args:
-            user_id: Original user ID
-            item_id: Original item ID
+            user_id: Original user ID from the dataset
+            item_id: Original item ID from the dataset
         
         Returns:
-            Predicted score
+            Predicted relevance score (interpretation depends on model type)
         """
         user_features = self._process_user_features(user_id)
         item_features = self._process_item_features(item_id)
@@ -210,8 +250,9 @@ class TwoTowerInference:
             for key in item_features['categorical']:
                 item_features['categorical'][key] = item_features['categorical'][key].to(self.device)
             
-            # Predict based on model type
+            # Model-specific prediction with proper input formatting
             if isinstance(self.model, EnhancedTwoTowerModel):
+                # Enhanced model expects separate categorical and numerical inputs
                 prediction = self.model(
                     user_features['categorical'],
                     user_features['numerical'] if user_features['numerical'] is not None else torch.zeros(1, 0).to(self.device),
@@ -219,32 +260,34 @@ class TwoTowerInference:
                     item_features['numerical'] if item_features['numerical'] is not None else torch.zeros(1, 0).to(self.device)
                 )
             elif isinstance(self.model, CollaborativeTwoTowerModel):
-                # Need user and item encodings
+                # Collaborative model needs both IDs for embeddings and features for content
                 user_encoded = self.user_encoder.transform([user_id])[0]
                 item_encoded = self.item_encoder.transform([item_id])[0]
                 
                 user_id_tensor = torch.LongTensor([user_encoded]).to(self.device)
                 item_id_tensor = torch.LongTensor([item_encoded]).to(self.device)
                 
-                # Flatten features for collaborative model
+                # Flatten content features for collaborative model
                 user_flat = self._flatten_features(user_features)
                 item_flat = self._flatten_features(item_features)
                 
                 prediction = self.model(user_id_tensor, item_id_tensor, user_flat, item_flat)
             else:
-                # Flatten features for simple models
+                # Basic model expects flattened feature vectors
                 user_flat = self._flatten_features(user_features)
                 item_flat = self._flatten_features(item_features)
                 
                 prediction = self.model(user_flat, item_flat)
             
+            # Extract prediction from model output
             if isinstance(prediction, dict):
-                # Multi-task model - use rating prediction if available
+                # Multi-task model: prioritize rating prediction, fallback to similarity
                 if 'rating' in prediction:
                     return prediction['rating'].item()
                 else:
                     return prediction['similarity'].item()
             else:
+                # Single-task model: direct prediction
                 return prediction.item()
     
     def _flatten_features(self, features: Dict[str, torch.Tensor]) -> torch.Tensor:
@@ -263,12 +306,19 @@ class TwoTowerInference:
             return torch.zeros(1, 1).to(self.device)
     
     def build_item_index(self):
-        """Build FAISS index for all items for efficient retrieval"""
+        """Build FAISS index for all items to enable efficient recommendation generation
+        
+        Pre-computes embeddings for all items in the catalog and builds a FAISS index
+        for fast similarity search. This is essential for production-scale recommendation
+        systems where you need to quickly find top-k items for any user.
+        """
         self.logger.info("Building item index...")
         
+        # Get all items in the catalog
         all_items = list(self.item_features_df['movieId'].unique())
         item_embeddings = []
         
+        # Process items in batches for memory efficiency
         batch_size = 100
         for i in range(0, len(all_items), batch_size):
             batch_items = all_items[i:i + batch_size]
@@ -284,7 +334,7 @@ class TwoTowerInference:
                         for key in item_features['categorical']:
                             item_features['categorical'][key] = item_features['categorical'][key].to(self.device)
                         
-                        # Get item embedding
+                        # Extract item embedding using model's encoder
                         if isinstance(self.model, EnhancedTwoTowerModel):
                             embedding = self.model.encode_items(
                                 item_features['categorical'],
@@ -302,32 +352,35 @@ class TwoTowerInference:
             if batch_embeddings:
                 item_embeddings.extend(batch_embeddings)
         
-        # Build FAISS index
+        # Build FAISS index for efficient similarity search
         if item_embeddings:
             self.item_embeddings_cache = np.vstack(item_embeddings)
             embedding_dim = self.item_embeddings_cache.shape[1]
             
-            # Use inner product index (cosine similarity for normalized vectors)
+            # IndexFlatIP: exact inner product search (cosine similarity for L2-normalized vectors)
             self.item_index = faiss.IndexFlatIP(embedding_dim)
             self.item_index.add(self.item_embeddings_cache.astype(np.float32))
             
-            self.indexed_items = all_items
-            self.logger.info(f"Built index for {len(all_items)} items")
+            self.indexed_items = all_items  # Maps index positions to item IDs
+            self.logger.info(f"Built FAISS index for {len(all_items)} items")
     
     def get_user_recommendations(self, user_id: int, top_k: int = 10,
                                 exclude_seen: bool = True,
                                 seen_items: Optional[List[int]] = None) -> List[Tuple[int, float]]:
         """
-        Get top-k recommendations for a user using efficient similarity search.
+        Generate top-k recommendations for a user using efficient FAISS-based retrieval.
+        
+        This is the main production method for generating recommendations.
+        Uses pre-computed item embeddings and FAISS for sub-linear search complexity.
         
         Args:
-            user_id: Original user ID
-            top_k: Number of recommendations
-            exclude_seen: Whether to exclude seen items
-            seen_items: List of items user has seen
+            user_id: Original user ID from the dataset
+            top_k: Number of recommendations to return
+            exclude_seen: Whether to filter out items the user has already interacted with
+            seen_items: Optional list of items to exclude (if not provided, no filtering)
         
         Returns:
-            List of (item_id, score) tuples
+            List of (item_id, similarity_score) tuples sorted by relevance
         """
         # Build index if not exists
         if self.item_index is None:
@@ -344,28 +397,30 @@ class TwoTowerInference:
             for key in user_features['categorical']:
                 user_features['categorical'][key] = user_features['categorical'][key].to(self.device)
             
-            # Get user embedding
+            # Generate user embedding using appropriate model interface
             if isinstance(self.model, EnhancedTwoTowerModel):
                 user_embedding = self.model.encode_users(
                     user_features['categorical'],
                     user_features['numerical'] if user_features['numerical'] is not None else torch.zeros(1, 0).to(self.device)
                 )
             elif isinstance(self.model, CollaborativeTwoTowerModel):
+                # Collaborative model needs both user ID and content features
                 user_encoded = self.user_encoder.transform([user_id])[0]
                 user_id_tensor = torch.LongTensor([user_encoded]).to(self.device)
                 user_flat = self._flatten_features(user_features)
                 user_embedding = self.model.encode_users(user_id_tensor, user_flat)
             else:
+                # Basic model uses flattened features
                 user_flat = self._flatten_features(user_features)
                 user_embedding = self.model.encode_users(user_flat)
             
             user_embedding_np = user_embedding.cpu().numpy().astype(np.float32)
         
-        # Search for similar items
-        search_k = min(top_k * 3, len(self.indexed_items))  # Search more items to account for filtering
+        # Efficient similarity search using FAISS
+        search_k = min(top_k * 3, len(self.indexed_items))  # Over-retrieve to account for filtering
         similarities, indices = self.item_index.search(user_embedding_np, search_k)
         
-        # Convert to recommendations
+        # Convert FAISS results to recommendations with optional filtering
         recommendations = []
         seen_set = set(seen_items) if seen_items else set()
         
@@ -373,11 +428,13 @@ class TwoTowerInference:
             if idx < len(self.indexed_items):
                 item_id = self.indexed_items[idx]
                 
+                # Filter out seen items if requested
                 if exclude_seen and item_id in seen_set:
                     continue
                 
                 recommendations.append((item_id, float(similarity)))
                 
+                # Stop when we have enough recommendations
                 if len(recommendations) >= top_k:
                     break
         
@@ -385,30 +442,37 @@ class TwoTowerInference:
     
     def find_similar_items(self, item_id: int, top_k: int = 10) -> List[Tuple[int, float]]:
         """
-        Find items similar to the given item.
+        Find items similar to a given item using item-to-item similarity.
+        
+        Useful for:
+        - "Customers who liked this also liked" recommendations
+        - Building item similarity matrices
+        - Content discovery and exploration
         
         Args:
-            item_id: Original item ID
-            top_k: Number of similar items
+            item_id: Original item ID to find similarities for
+            top_k: Number of similar items to return
         
         Returns:
-            List of (similar_item_id, similarity) tuples
+            List of (similar_item_id, similarity_score) tuples
         """
         if self.item_index is None:
             self.build_item_index()
         
         try:
+            # Find the item in our index
             item_idx = self.indexed_items.index(item_id)
             item_embedding = self.item_embeddings_cache[item_idx:item_idx+1].astype(np.float32)
             
-            # Search for similar items
-            similarities, indices = self.item_index.search(item_embedding, top_k + 1)  # +1 to exclude self
+            # Search for similar items (+1 to account for the item itself)
+            similarities, indices = self.item_index.search(item_embedding, top_k + 1)
             
+            # Process results and exclude the query item itself
             similar_items = []
             for similarity, idx in zip(similarities[0], indices[0]):
                 if idx < len(self.indexed_items):
                     similar_item_id = self.indexed_items[idx]
-                    if similar_item_id != item_id:  # Exclude the item itself
+                    if similar_item_id != item_id:  # Exclude the query item itself
                         similar_items.append((similar_item_id, float(similarity)))
                         
                     if len(similar_items) >= top_k:
@@ -422,13 +486,18 @@ class TwoTowerInference:
     
     def batch_predict(self, user_item_pairs: List[Tuple[int, int]]) -> List[float]:
         """
-        Predict scores for multiple user-item pairs efficiently.
+        Predict scores for multiple user-item pairs in batch for efficiency.
+        
+        Useful for:
+        - Offline evaluation and A/B testing
+        - Bulk scoring for analytics
+        - Pre-computing scores for candidate sets
         
         Args:
-            user_item_pairs: List of (user_id, item_id) tuples
+            user_item_pairs: List of (user_id, item_id) tuples to score
         
         Returns:
-            List of predicted scores
+            List of predicted scores in the same order as input pairs
         """
         predictions = []
         
@@ -440,55 +509,58 @@ class TwoTowerInference:
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Two-Tower Model Inference')
+    """Command-line interface for two-tower model inference demonstration"""
+    parser = argparse.ArgumentParser(description='Two-Tower Model Inference Engine')
     parser.add_argument('--model-path', type=str, required=True,
-                       help='Path to trained model')
+                       help='Path to trained model checkpoint (.pt file)')
     parser.add_argument('--preprocessors-path', type=str, required=True,
-                       help='Path to preprocessors file')
-    parser.add_argument('--user-id', type=int, help='User ID for recommendations')
-    parser.add_argument('--item-id', type=int, help='Item ID for similarity search')
+                       help='Path to saved preprocessors (.pkl file)')
+    parser.add_argument('--user-id', type=int, 
+                       help='User ID for personalized recommendations')
+    parser.add_argument('--item-id', type=int, 
+                       help='Item ID for similarity search')
     parser.add_argument('--top-k', type=int, default=10,
-                       help='Number of recommendations/similar items')
+                       help='Number of recommendations/similar items to return')
     parser.add_argument('--device', type=str, default='auto',
-                       help='Device to use')
+                       help='Computing device (auto, cuda, cpu)')
     parser.add_argument('--build-index', action='store_true',
-                       help='Build item index for efficient search')
+                       help='Build FAISS index for efficient similarity search')
     
     args = parser.parse_args()
     
     # Setup logging
     logging.basicConfig(level=logging.INFO)
     
-    # Create inference object
+    # Initialize inference engine with trained model and preprocessors
     tt_inference = TwoTowerInference(
         model_path=args.model_path,
         preprocessors_path=args.preprocessors_path,
         device=args.device
     )
     
-    # Build index if requested
+    # Build FAISS index for efficient retrieval if requested
     if args.build_index:
         tt_inference.build_item_index()
     
-    # Example usage
+    # Demonstration of inference capabilities
     if args.user_id and args.item_id:
-        # Predict score
+        # Predict relevance score for specific user-item pair
         score = tt_inference.predict_user_item_score(args.user_id, args.item_id)
-        print(f"Predicted score for user {args.user_id}, item {args.item_id}: {score:.4f}")
+        print(f"Predicted relevance score for user {args.user_id}, item {args.item_id}: {score:.4f}")
     
     if args.user_id:
-        # Get recommendations
+        # Generate personalized recommendations using FAISS-based retrieval
         recommendations = tt_inference.get_user_recommendations(
             args.user_id, top_k=args.top_k
         )
-        print(f"\nTop {args.top_k} recommendations for user {args.user_id}:")
+        print(f"\nTop {args.top_k} personalized recommendations for user {args.user_id}:")
         for item_id, score in recommendations:
             print(f"  Item {item_id}: {score:.4f}")
     
     if args.item_id:
-        # Find similar items
+        # Find items similar to the given item
         similar_items = tt_inference.find_similar_items(args.item_id, top_k=args.top_k)
-        print(f"\nItems similar to item {args.item_id}:")
+        print(f"\nItems most similar to item {args.item_id}:")
         for item_id, similarity in similar_items:
             print(f"  Item {item_id}: {similarity:.4f}")
 

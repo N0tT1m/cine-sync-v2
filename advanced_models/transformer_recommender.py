@@ -1,3 +1,7 @@
+# Transformer-based Sequential Recommendation for CineSync v2
+# Implements SASRec and enhanced variants for sequential recommendation
+# Optimized for RTX 4090 with advanced attention mechanisms and multi-task learning
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -7,42 +11,78 @@ from typing import Optional, Tuple, Dict, Any
 
 
 class PositionalEncoding(nn.Module):
-    """Positional encoding for transformer-based sequential recommendation"""
+    """Positional encoding for transformer-based sequential recommendation
+    
+    Adds position information to item embeddings so the model can understand
+    the temporal order of user interactions, which is crucial for sequential
+    recommendation tasks.
+    """
     
     def __init__(self, d_model: int, max_len: int = 5000):
+        """Initialize positional encoding with sinusoidal patterns
+        
+        Args:
+            d_model: Model dimension size
+            max_len: Maximum sequence length to support
+        """
         super(PositionalEncoding, self).__init__()
         
+        # Create positional encoding matrix
         pe = torch.zeros(max_len, d_model)
         position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
         
+        # Create frequency terms for sinusoidal encoding
         div_term = torch.exp(torch.arange(0, d_model, 2).float() * 
                            (-math.log(10000.0) / d_model))
         
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        pe = pe.unsqueeze(0).transpose(0, 1)
+        # Apply sine to even indices and cosine to odd indices
+        pe[:, 0::2] = torch.sin(position * div_term)  # Even dimensions: sin
+        pe[:, 1::2] = torch.cos(position * div_term)  # Odd dimensions: cos
+        pe = pe.unsqueeze(0).transpose(0, 1)          # Shape: [max_len, 1, d_model]
         
+        # Register as buffer (not a parameter, but part of model state)
         self.register_buffer('pe', pe)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return x + self.pe[:x.size(0), :]
+        """Add positional encoding to input embeddings
+        
+        Args:
+            x: Input embeddings [seq_len, batch_size, d_model]
+            
+        Returns:
+            Position-encoded embeddings
+        """
+        return x + self.pe[:x.size(0), :]  # Add positional info to embeddings
 
 
 class MultiHeadSelfAttention(nn.Module):
-    """Multi-head self-attention mechanism optimized for recommendations"""
+    """Multi-head self-attention mechanism optimized for recommendations
+    
+    Core component of transformer that allows each position to attend to all
+    positions in the sequence, enabling the model to capture complex dependencies
+    between user interactions at different time steps.
+    """
     
     def __init__(self, d_model: int, num_heads: int = 8, dropout: float = 0.1):
+        """Initialize multi-head self-attention
+        
+        Args:
+            d_model: Model dimension size
+            num_heads: Number of parallel attention heads
+            dropout: Dropout rate for regularization
+        """
         super(MultiHeadSelfAttention, self).__init__()
         assert d_model % num_heads == 0
         
         self.d_model = d_model
         self.num_heads = num_heads
-        self.d_k = d_model // num_heads
+        self.d_k = d_model // num_heads  # Dimension per head
         
-        self.w_q = nn.Linear(d_model, d_model, bias=False)
-        self.w_k = nn.Linear(d_model, d_model, bias=False)
-        self.w_v = nn.Linear(d_model, d_model, bias=False)
-        self.w_o = nn.Linear(d_model, d_model)
+        # Linear projections for query, key, value, and output
+        self.w_q = nn.Linear(d_model, d_model, bias=False)  # Query projection
+        self.w_k = nn.Linear(d_model, d_model, bias=False)  # Key projection
+        self.w_v = nn.Linear(d_model, d_model, bias=False)  # Value projection
+        self.w_o = nn.Linear(d_model, d_model)              # Output projection
         
         self.dropout = nn.Dropout(dropout)
         self.layer_norm = nn.LayerNorm(d_model)
@@ -50,36 +90,42 @@ class MultiHeadSelfAttention(nn.Module):
         self._init_weights()
     
     def _init_weights(self):
+        """Initialize weights with Xavier uniform for stable training"""
         for module in [self.w_q, self.w_k, self.w_v, self.w_o]:
             nn.init.xavier_uniform_(module.weight)
     
     def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         batch_size, seq_len, d_model = x.size()
         
-        # Linear transformations and reshape
+        # Transform input to queries, keys, values and split into heads
+        # Shape: [batch, seq_len, d_model] -> [batch, num_heads, seq_len, d_k]
         Q = self.w_q(x).view(batch_size, seq_len, self.num_heads, self.d_k).transpose(1, 2)
         K = self.w_k(x).view(batch_size, seq_len, self.num_heads, self.d_k).transpose(1, 2)
         V = self.w_v(x).view(batch_size, seq_len, self.num_heads, self.d_k).transpose(1, 2)
         
-        # Scaled dot-product attention
+        # Scaled dot-product attention: softmax(QK^T/sqrt(d_k))V
+        # Scale prevents softmax from saturating for large d_k
         scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.d_k)
         
+        # Apply causal mask to prevent attending to future positions
         if mask is not None:
-            scores = scores.masked_fill(mask == 0, -1e9)
+            scores = scores.masked_fill(mask == 0, -1e9)  # Large negative value
         
+        # Convert scores to attention weights and apply dropout
         attn_weights = F.softmax(scores, dim=-1)
-        attn_weights = self.dropout(attn_weights)
+        attn_weights = self.dropout(attn_weights)  # Dropout on attention weights
         
-        # Apply attention to values
+        # Apply attention weights to values: weighted sum of value vectors
         attn_output = torch.matmul(attn_weights, V)
         
-        # Concatenate heads and project
+        # Concatenate attention heads back to original dimension
+        # Shape: [batch, num_heads, seq_len, d_k] -> [batch, seq_len, d_model]
         attn_output = attn_output.transpose(1, 2).contiguous().view(
             batch_size, seq_len, d_model
         )
-        output = self.w_o(attn_output)
+        output = self.w_o(attn_output)  # Final linear projection
         
-        # Residual connection and layer norm
+        # Residual connection and layer normalization for stable training
         return self.layer_norm(x + self.dropout(output))
 
 

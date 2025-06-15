@@ -1,3 +1,7 @@
+# Sequential Recommendation Data Loading and Preprocessing
+# Handles user interaction sequences for sequential and session-based recommendation
+# Supports both temporal sequential splitting and session-based data organization
+
 import torch
 from torch.utils.data import Dataset, DataLoader
 import pandas as pd
@@ -12,7 +16,11 @@ import pickle
 
 class SequentialDataset(Dataset):
     """
-    Dataset for sequential recommendation that handles user interaction sequences.
+    PyTorch Dataset for sequential recommendation that handles user interaction sequences.
+    
+    Converts user interaction sequences into training samples for next-item prediction.
+    Each sample consists of a sequence of items and the target next item to predict.
+    Handles variable-length sequences through padding and length tracking.
     """
     
     def __init__(self, sequences: List[List[int]], targets: List[int], 
@@ -29,19 +37,19 @@ class SequentialDataset(Dataset):
         self.max_seq_len = max_seq_len
         self.item_encoder = item_encoder
         
-        # Pad/truncate sequences
+        # Pad/truncate sequences to uniform length for batch processing
         self.padded_sequences = []
-        self.sequence_lengths = []
+        self.sequence_lengths = []  # Track original lengths for proper RNN processing
         
         for seq in sequences:
             if len(seq) > max_seq_len:
-                # Take the most recent items
+                # Truncate to most recent items (recency bias for recommendations)
                 padded_seq = seq[-max_seq_len:]
                 seq_len = max_seq_len
             else:
-                # Pad with zeros
+                # Pad with zeros (item ID 0 reserved for padding)
                 padded_seq = seq + [0] * (max_seq_len - len(seq))
-                seq_len = len(seq)
+                seq_len = len(seq)  # Store actual sequence length
             
             self.padded_sequences.append(padded_seq)
             self.sequence_lengths.append(seq_len)
@@ -64,7 +72,11 @@ class SequentialDataset(Dataset):
 
 class SessionDataset(Dataset):
     """
-    Dataset for session-based recommendation where each sample is a session.
+    PyTorch Dataset for session-based recommendation where each sample is a session.
+    
+    Unlike sequential recommendation which models long-term user preferences,
+    session-based recommendation focuses on short-term patterns within individual
+    browsing/interaction sessions. Creates multiple training samples from each session.
     """
     
     def __init__(self, sessions: List[List[int]], max_session_len: int = 20):
@@ -76,19 +88,20 @@ class SessionDataset(Dataset):
         self.sessions = sessions
         self.max_session_len = max_session_len
         
-        # Process sessions for next-item prediction
-        self.input_sequences = []
-        self.target_items = []
-        self.session_lengths = []
+        # Process sessions for next-item prediction by creating multiple training samples
+        self.input_sequences = []  # Input item sequences
+        self.target_items = []     # Target items to predict
+        self.session_lengths = []  # Actual sequence lengths
         
         for session in sessions:
-            if len(session) < 2:  # Need at least 2 items
+            if len(session) < 2:  # Need at least input + target
                 continue
             
-            # Create multiple training samples from each session
+            # Create multiple training samples from each session using sliding window
+            # This generates samples: [item1] -> item2, [item1, item2] -> item3, etc.
             for i in range(1, len(session)):
-                input_seq = session[:i]
-                target_item = session[i]
+                input_seq = session[:i]    # Items up to position i
+                target_item = session[i]   # Item at position i
                 
                 # Pad/truncate input sequence
                 if len(input_seq) > max_session_len:
@@ -120,7 +133,14 @@ class SessionDataset(Dataset):
 
 class SequentialDataLoader:
     """
-    Data loader for sequential recommendation models with various preprocessing options.
+    Comprehensive data loader for sequential recommendation models with preprocessing.
+    
+    Handles the complete pipeline from raw ratings data to PyTorch DataLoaders:
+    - Temporal sorting of interactions
+    - User filtering based on interaction count
+    - ID encoding for embedding layers
+    - Sequence creation and splitting strategies
+    - Support for both sequential and session-based data organization
     """
     
     def __init__(self, ratings_path: str, min_interactions: int = 10, 
@@ -148,27 +168,30 @@ class SequentialDataLoader:
         self._create_sequences()
     
     def _load_data(self):
-        """Load and preprocess ratings data"""
+        """Load and preprocess ratings data for sequential modeling"""
         self.logger.info(f"Loading ratings from {self.ratings_path}")
         
-        # Load ratings
+        # Load ratings data (userId, movieId, rating, timestamp)
         self.ratings_df = pd.read_csv(self.ratings_path)
         
-        # Sort by user and timestamp for sequential order
+        # Sort by user and timestamp to create chronological sequences
+        # This is critical for sequential modeling as we need temporal order
         self.ratings_df = self.ratings_df.sort_values(['userId', 'timestamp'])
         
-        # Filter users with minimum interactions
+        # Filter users with minimum interactions to ensure meaningful sequences
+        # Cold start users with few interactions provide little training signal
         user_counts = self.ratings_df['userId'].value_counts()
         valid_users = user_counts[user_counts >= self.min_interactions].index
         self.ratings_df = self.ratings_df[self.ratings_df['userId'].isin(valid_users)]
         
         self.logger.info(f"Filtered to {len(valid_users)} users with {len(self.ratings_df)} interactions")
         
-        # Encode users and items
+        # Encode users and items to contiguous indices for embedding layers
         self.ratings_df['user_encoded'] = self.user_encoder.fit_transform(self.ratings_df['userId'])
         self.ratings_df['item_encoded'] = self.item_encoder.fit_transform(self.ratings_df['movieId'])
         
-        # Add 1 to item encodings to reserve 0 for padding
+        # Add 1 to item encodings to reserve 0 for padding token
+        # Embedding layer will have size num_items + 1 to accommodate this
         self.ratings_df['item_encoded'] += 1
     
     def _create_sequences(self):
@@ -193,8 +216,15 @@ class SequentialDataLoader:
     
     def get_sequential_splits(self, train_ratio: float = 0.8, val_ratio: float = 0.1) -> Tuple[List, List, List]:
         """
-        Create train/val/test splits for sequential recommendation.
-        Uses temporal splitting to maintain chronological order.
+        Create train/val/test splits for sequential recommendation using temporal splitting.
+        
+        Uses chronological splitting to simulate real-world scenario where we predict
+        future interactions based on past behavior. Each user's sequence is split
+        temporally to maintain the sequential nature of the data.
+        
+        Args:
+            train_ratio: Proportion of each sequence for training
+            val_ratio: Proportion of training data for validation
         
         Returns:
             Tuple of (train_sequences, val_sequences, test_sequences)
@@ -214,11 +244,13 @@ class SequentialDataLoader:
             if train_end < self.min_seq_length:
                 continue
             
-            # Create training samples (all possible subsequences)
+            # Create training samples using all possible subsequences
+            # This data augmentation increases training data and helps model learn
+            # from sequences of varying lengths
             train_seq = sequence[:train_end]
             for i in range(self.min_seq_length, len(train_seq)):
-                input_seq = train_seq[:i]
-                target = train_seq[i]
+                input_seq = train_seq[:i]  # Items up to position i
+                target = train_seq[i]      # Item at position i (next item)
                 train_sequences.append((input_seq, target))
             
             # Validation sample
@@ -240,10 +272,14 @@ class SequentialDataLoader:
     
     def get_session_splits(self, session_threshold: int = 3600) -> Tuple[List, List, List]:
         """
-        Create session-based splits where sessions are defined by time gaps.
+        Create session-based splits where sessions are defined by temporal gaps.
+        
+        Identifies natural session boundaries by detecting large time gaps in user
+        interactions. This approach is more realistic for session-based recommendation
+        where we want to model short-term behavioral patterns within sessions.
         
         Args:
-            session_threshold: Time gap (seconds) to define new session
+            session_threshold: Time gap in seconds to define new session (default: 1 hour)
             
         Returns:
             Tuple of (train_sessions, val_sessions, test_sessions)
@@ -256,7 +292,7 @@ class SequentialDataLoader:
             user_ratings = self.ratings_df[self.ratings_df['user_encoded'] == user_id].copy()
             user_ratings = user_ratings.sort_values('timestamp')
             
-            # Split into sessions based on time gaps
+            # Split into sessions based on temporal gaps in user activity
             sessions = []
             current_session = []
             prev_timestamp = None
@@ -265,12 +301,14 @@ class SequentialDataLoader:
                 timestamp = row['timestamp']
                 item_id = row['item_encoded']
                 
+                # Check if this interaction belongs to current session or starts new one
                 if prev_timestamp is None or (timestamp - prev_timestamp) <= session_threshold:
-                    current_session.append(item_id)
+                    current_session.append(item_id)  # Continue current session
                 else:
-                    if len(current_session) >= 2:
+                    # Time gap too large, start new session
+                    if len(current_session) >= 2:  # Only keep sessions with multiple items
                         sessions.append(current_session)
-                    current_session = [item_id]
+                    current_session = [item_id]  # Start new session
                 
                 prev_timestamp = timestamp
             

@@ -37,14 +37,23 @@ logger = logging.getLogger("feedback-retraining")
 
 
 def load_feedback_data():
-    """Load feedback data from PostgreSQL database"""
+    """Load feedback data from PostgreSQL database
+    
+    Connects to the Discord bot's PostgreSQL database to retrieve:
+    - Direct user ratings from the /rate command
+    - Feedback ratings from movie recommendations
+    - Sentiment analysis data (positive/negative feedback)
+    
+    Returns:
+        tuple: (ratings_df, feedback_df, sentiment_df) or (None, None, None) on error
+    """
     logger.info("Loading feedback data from PostgreSQL")
     
     try:
         conn = psycopg2.connect(**DB_CONFIG)
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         
-        # Get all user ratings
+        # Get all direct user ratings from Discord /rate command
         cursor.execute('''
             SELECT user_id, movie_id, rating, timestamp
             FROM user_ratings
@@ -52,7 +61,7 @@ def load_feedback_data():
         ''')
         ratings_data = cursor.fetchall()
         
-        # Get feedback with ratings
+        # Get feedback ratings from recommendation interactions
         cursor.execute('''
             SELECT user_id, movie_id, rating, feedback_type, timestamp
             FROM feedback
@@ -61,7 +70,7 @@ def load_feedback_data():
         ''')
         feedback_ratings = cursor.fetchall()
         
-        # Get positive/negative feedback for weighting
+        # Get sentiment feedback for user preference weighting
         cursor.execute('''
             SELECT user_id, feedback_type, COUNT(*) as count
             FROM feedback
@@ -87,38 +96,54 @@ def load_feedback_data():
 
 
 def process_feedback_ratings(ratings_df, feedback_df, sentiment_df):
-    """Process and combine feedback data with original ratings"""
+    """Process and combine feedback data with original ratings
+    
+    Converts raw database feedback into standardized format for training:
+    - Normalizes user/movie IDs to integers
+    - Standardizes rating scales
+    - Removes duplicates (keeping most recent rating per user-movie pair)
+    - Adds data source tracking for analysis
+    
+    Args:
+        ratings_df (pd.DataFrame): Direct user ratings from Discord
+        feedback_df (pd.DataFrame): Feedback ratings from recommendations
+        sentiment_df (pd.DataFrame): Positive/negative feedback counts
+        
+    Returns:
+        pd.DataFrame: Processed and combined ratings data
+    """
     logger.info("Processing feedback ratings")
     
     combined_ratings = []
     
-    # Process direct ratings from bot
+    # Process direct ratings from Discord bot /rate command
     if not ratings_df.empty:
         for _, row in ratings_df.iterrows():
             combined_ratings.append({
-                'userId': int(row['user_id']),
-                'movieId': int(row['movie_id']),
-                'rating': float(row['rating']),
-                'timestamp': row['timestamp'],
-                'source': 'discord_rating'
+                'userId': int(row['user_id']),      # Discord user ID
+                'movieId': int(row['movie_id']),    # TMDB or IMDb movie ID
+                'rating': float(row['rating']),     # User's explicit rating
+                'timestamp': row['timestamp'],       # When rating was given
+                'source': 'discord_rating'          # Track data source
             })
     
-    # Process feedback ratings
+    # Process implicit feedback ratings from recommendation responses
     if not feedback_df.empty:
         for _, row in feedback_df.iterrows():
             combined_ratings.append({
-                'userId': int(row['user_id']),
-                'movieId': int(row['movie_id']),
-                'rating': float(row['rating']),
-                'timestamp': row['timestamp'],
-                'source': 'discord_feedback'
+                'userId': int(row['user_id']),      # Discord user ID
+                'movieId': int(row['movie_id']),    # Recommended movie ID
+                'rating': float(row['rating']),     # Inferred rating from feedback
+                'timestamp': row['timestamp'],       # When feedback was given
+                'source': 'discord_feedback'        # Track as implicit feedback
             })
     
     # Create DataFrame
     if combined_ratings:
         new_ratings_df = pd.DataFrame(combined_ratings)
         
-        # Remove duplicates (keep most recent rating for same user/movie)
+        # Remove duplicates - keep most recent rating for each user-movie pair
+        # This handles cases where users rate the same movie multiple times
         new_ratings_df = new_ratings_df.sort_values('timestamp').drop_duplicates(
             ['userId', 'movieId'], keep='last'
         )
@@ -130,7 +155,19 @@ def process_feedback_ratings(ratings_df, feedback_df, sentiment_df):
 
 
 def create_user_preference_weights(sentiment_df):
-    """Create user preference weights based on positive/negative feedback"""
+    """Create user preference weights based on positive/negative feedback
+    
+    Analyzes user feedback patterns to create training sample weights:
+    - Users with more positive feedback get higher weights
+    - Users with mixed feedback get moderate weights
+    - Helps the model learn from users with consistent preferences
+    
+    Args:
+        sentiment_df (pd.DataFrame): Positive/negative feedback counts per user
+        
+    Returns:
+        dict: Mapping of user_id to preference weight (0.0 to 1.0)
+    """
     user_weights = {}
     
     if not sentiment_df.empty:
@@ -143,34 +180,43 @@ def create_user_preference_weights(sentiment_df):
             
             total_feedback = positive_count + negative_count
             if total_feedback > 0:
-                # Weight based on feedback ratio (more positive = higher weight)
+                # Calculate preference consistency weight with Laplace smoothing
+                # More positive feedback = higher training weight
                 weight = (positive_count + 1) / (total_feedback + 2)  # Add smoothing
                 user_weights[user_id] = weight
             else:
-                user_weights[user_id] = 0.5  # Neutral weight
+                user_weights[user_id] = 0.5  # Neutral weight for users without sentiment data
     
     logger.info(f"Created preference weights for {len(user_weights)} users")
     return user_weights
 
 
 def load_original_data():
-    """Load original training data if available"""
+    """Load original training data if available
+    
+    Attempts to load the baseline training data (MovieLens, etc.) to combine
+    with new feedback data. This preserves the model's general knowledge
+    while incorporating user-specific preferences.
+    
+    Returns:
+        pd.DataFrame: Original training data or empty DataFrame if not found
+    """
     logger.info("Loading original training data")
     
     try:
-        # Try to load existing processed data
+        # Try to load previously processed and cached training data
         if os.path.exists('data/original_train_data.csv'):
             original_df = pd.read_csv('data/original_train_data.csv')
             logger.info(f"Loaded {len(original_df)} original training samples")
             return original_df
         
-        # If no processed data, try to load from original sources
+        # If no cached data, reprocess from original dataset files
         data_files = find_data_files()
         if data_files:
             train_data, val_data, movies_df, genres = process_and_prepare_data(data_files)
             
             if train_data is not None and val_data is not None:
-                # Combine train and validation data
+                # Combine train and validation for complete baseline dataset
                 original_df = pd.concat([train_data, val_data], ignore_index=True)
                 
                 # Save for future use
@@ -189,19 +235,34 @@ def load_original_data():
 
 
 def combine_datasets(original_df, feedback_df, user_weights=None):
-    """Combine original training data with new feedback data"""
+    """Combine original training data with new feedback data
+    
+    Merges baseline training data with new user feedback to create
+    an enhanced training dataset. Handles:
+    - Data format standardization
+    - Duplicate resolution (prioritizing recent feedback)
+    - Sample weighting based on user preference consistency
+    - Temporal weighting to emphasize recent interactions
+    
+    Args:
+        original_df (pd.DataFrame): Baseline training data (MovieLens, etc.)
+        feedback_df (pd.DataFrame): New feedback data from Discord bot
+        user_weights (dict): Optional user preference weights
+        
+    Returns:
+        pd.DataFrame: Combined training dataset with sample weights
+    """
     logger.info("Combining original and feedback datasets")
     
     if original_df.empty and feedback_df.empty:
         logger.error("No data available for training")
         return None
     
-    # If we only have feedback data, use it directly
+    # Handle cases where only one dataset is available
     if original_df.empty:
         logger.info("Using only feedback data for training")
         combined_df = feedback_df.copy()
     
-    # If we only have original data, use it directly
     elif feedback_df.empty:
         logger.info("No new feedback data, using original data")
         combined_df = original_df.copy()
@@ -210,7 +271,7 @@ def combine_datasets(original_df, feedback_df, user_weights=None):
     else:
         logger.info("Combining original and feedback data")
         
-        # Standardize column names
+        # Standardize column names for compatibility between datasets
         if 'userId' not in original_df.columns and 'user_id' in original_df.columns:
             original_df = original_df.rename(columns={'user_id': 'userId'})
         if 'movieId' not in original_df.columns and 'movie_id' in original_df.columns:
@@ -223,27 +284,27 @@ def combine_datasets(original_df, feedback_df, user_weights=None):
         # Combine datasets
         combined_df = pd.concat([original_df, feedback_df], ignore_index=True)
         
-        # Remove duplicates (prefer feedback data over original for same user/movie)
+        # Resolve conflicts by preferring more recent feedback over original data
         combined_df = combined_df.sort_values(['userId', 'movieId', 'timestamp']).drop_duplicates(
             ['userId', 'movieId'], keep='last'
         )
     
-    # Add sample weights based on user feedback sentiment
+    # Apply user preference weights to emphasize consistent users
     if user_weights:
         combined_df['sample_weight'] = combined_df['userId'].map(user_weights).fillna(0.5)
     else:
-        combined_df['sample_weight'] = 1.0
+        combined_df['sample_weight'] = 1.0  # Equal weight for all samples
     
-    # Give higher weight to recent feedback
+    # Apply temporal weighting to emphasize recent user preferences
     if 'timestamp' in combined_df.columns:
-        # Convert timestamp to days since earliest rating
+        # Convert timestamps and calculate relative recency
         combined_df['timestamp'] = pd.to_datetime(combined_df['timestamp'])
         min_date = combined_df['timestamp'].min()
         combined_df['days_since_start'] = (combined_df['timestamp'] - min_date).dt.days
         max_days = combined_df['days_since_start'].max()
         
         if max_days > 0:
-            # More recent ratings get higher weight (0.5 to 1.5 multiplier)
+            # Apply time-based weighting: recent ratings get 0.5-1.5x multiplier
             time_weight = 0.5 + (combined_df['days_since_start'] / max_days)
             combined_df['sample_weight'] *= time_weight
     
@@ -254,7 +315,18 @@ def combine_datasets(original_df, feedback_df, user_weights=None):
 
 
 def retrain_model_with_feedback():
-    """Main function to retrain model with feedback data"""
+    """Main function to retrain model with feedback data
+    
+    Orchestrates the complete retraining pipeline:
+    1. Loads feedback data from PostgreSQL database
+    2. Combines with original training data
+    3. Applies user preference and temporal weighting
+    4. Retrains the model with enhanced dataset
+    5. Backs up original model and saves new version
+    
+    Returns:
+        bool: True if retraining succeeded, False otherwise
+    """
     logger.info("Starting model retraining with feedback data")
     
     try:
@@ -267,7 +339,7 @@ def retrain_model_with_feedback():
             logger.error("Failed to load feedback data")
             return False
         
-        # Check if we have enough feedback data
+        # Verify sufficient feedback data for meaningful retraining
         total_feedback = len(ratings_df) + len(feedback_df)
         if total_feedback < 5:
             logger.warning(f"Insufficient feedback data ({total_feedback} samples). Need at least 5.")
@@ -352,7 +424,7 @@ def retrain_model_with_feedback():
         with open('models/rating_scaler.pkl', 'wb') as f:
             pickle.dump(scaler, f)
         
-        # Backup original model
+        # Create backup of current model before retraining
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         if os.path.exists('models/recommendation_model.pt'):
             os.rename('models/recommendation_model.pt', f'models/backup_model_{timestamp}.pt')
@@ -361,15 +433,15 @@ def retrain_model_with_feedback():
         # Train the model with feedback data
         logger.info("Starting model training with feedback data")
         
-        # Use smaller batch size and fewer epochs for feedback retraining
+        # Retrain with conservative parameters to avoid overfitting on small feedback data
         model, history = train_model(
             train_data=train_data,
             val_data=val_data,
             movies_df=movies_df,
             genres=genres,
             device=device,
-            epochs=10,  # Fewer epochs for retraining
-            batch_size=32,  # Smaller batch size
+            epochs=10,        # Fewer epochs to prevent overfitting
+            batch_size=32,    # Smaller batches for fine-tuning
             embedding_padding=50
         )
         
@@ -400,14 +472,23 @@ def retrain_model_with_feedback():
 
 
 def export_feedback_summary():
-    """Export a summary of feedback data for analysis"""
+    """Export a summary of feedback data for analysis
+    
+    Creates comprehensive statistics about user feedback patterns:
+    - Feedback type distribution (positive/negative/ratings)
+    - Most active users and their rating patterns
+    - Temporal feedback trends
+    
+    Returns:
+        bool: True if export succeeded, False otherwise
+    """
     logger.info("Exporting feedback summary")
     
     try:
         conn = psycopg2.connect(**DB_CONFIG)
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         
-        # Get feedback statistics
+        # Analyze feedback patterns by type
         cursor.execute('''
             SELECT 
                 feedback_type,
@@ -420,7 +501,7 @@ def export_feedback_summary():
         
         feedback_stats = cursor.fetchall()
         
-        # Get user activity
+        # Identify most active users for quality analysis
         cursor.execute('''
             SELECT 
                 user_id,

@@ -1,3 +1,7 @@
+# Two-Tower Model Training and Evaluation Framework
+# Specialized trainer for dual-encoder architectures with retrieval-focused evaluation
+# Includes support for FAISS-based efficient similarity search and ranking metrics
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -9,7 +13,7 @@ import logging
 import time
 from pathlib import Path
 import json
-import faiss
+import faiss  # Facebook AI Similarity Search for efficient vector retrieval
 from sklearn.metrics import roc_auc_score, precision_recall_curve, auc
 
 from .model import (
@@ -20,7 +24,14 @@ from .model import (
 
 class TwoTowerTrainer:
     """
-    Trainer class for Two-Tower models with specialized evaluation for retrieval tasks.
+    Specialized trainer for Two-Tower recommendation models with retrieval-focused evaluation.
+    
+    Handles training of dual-encoder architectures with proper support for:
+    - Multiple model variants (basic, enhanced, multi-task, collaborative)
+    - Mixed loss functions (MSE for ratings, BCE for clicks)
+    - Retrieval-specific metrics (Hit Rate, NDCG, MRR)
+    - Multi-task learning with task-specific heads
+    - Temperature-scaled similarity learning
     """
     
     def __init__(self, model: nn.Module, device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
@@ -44,9 +55,9 @@ class TwoTowerTrainer:
             weight_decay=weight_decay
         )
         
-        # Loss functions
-        self.mse_loss = nn.MSELoss()
-        self.bce_loss = nn.BCEWithLogitsLoss()
+        # Loss functions for different prediction tasks
+        self.mse_loss = nn.MSELoss()                  # For rating prediction (regression)
+        self.bce_loss = nn.BCEWithLogitsLoss()        # For click prediction (binary classification)
         
         # Training history
         self.train_losses = []
@@ -323,6 +334,15 @@ class TwoTowerTrainer:
 class TwoTowerEvaluator:
     """
     Comprehensive evaluator for Two-Tower models with retrieval and ranking metrics.
+    
+    Specializes in evaluation metrics relevant to recommendation systems:
+    - Retrieval metrics (Hit Rate, NDCG, MRR)
+    - Efficient similarity search using FAISS
+    - Embedding quality analysis
+    - Large-scale evaluation capabilities
+    
+    This evaluator is designed for production-like evaluation scenarios
+    where efficiency and scalability are important.
     """
     
     def __init__(self, model: nn.Module, device: str = 'cuda' if torch.cuda.is_available() else 'cpu'):
@@ -364,7 +384,7 @@ class TwoTowerEvaluator:
                     user_emb = self.model.encode_users(user_categorical, user_numerical)
                     item_emb = self.model.encode_items(item_categorical, item_numerical)
                     
-                elif 'user_id' in batch and hasattr(self.model, 'user_collaborative_embedding'):
+                elif 'user_id' in batch and hasattr(self.model, 'user_collaborative_embedding'):  # Collaborative model
                     user_id_batch = batch['user_id'].to(self.device)
                     item_id_batch = batch['item_id'].to(self.device)
                     user_features = batch['user_features'].to(self.device)
@@ -373,7 +393,7 @@ class TwoTowerEvaluator:
                     user_emb = self.model.encode_users(user_id_batch, user_features)
                     item_emb = self.model.encode_items(item_id_batch, item_features)
                     
-                else:
+                else:  # Basic model
                     user_features = batch['user_features'].to(self.device)
                     item_features = batch['item_features'].to(self.device)
                     

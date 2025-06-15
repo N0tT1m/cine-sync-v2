@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 """
-Training script for Two-Tower/Dual-Encoder models.
+Comprehensive Training Script for Two-Tower/Dual-Encoder Models
+
+Supports training of multiple two-tower architectures for large-scale recommendation:
+- Basic Two-Tower: simple dual-encoder with dense features
+- Enhanced Two-Tower: mixed categorical/numerical features with cross-attention
+- Multi-Task Two-Tower: joint optimization of multiple objectives
+- Collaborative Two-Tower: hybrid content + collaborative filtering
+
+Includes advanced evaluation with retrieval metrics and FAISS-based similarity search.
 """
 
 import argparse
@@ -23,7 +31,7 @@ from src.trainer import TwoTowerTrainer, TwoTowerEvaluator
 
 
 def setup_logging(log_level: str = "INFO"):
-    """Setup logging configuration"""
+    """Setup comprehensive logging for training monitoring and debugging"""
     logging.basicConfig(
         level=getattr(logging, log_level.upper()),
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -35,53 +43,57 @@ def setup_logging(log_level: str = "INFO"):
 
 
 def parse_args():
-    """Parse command line arguments"""
+    """Parse comprehensive command line arguments for flexible two-tower training
+    
+    Supports configuration of multiple model types, training parameters,
+    evaluation settings, and experiment tracking options.
+    """
     parser = argparse.ArgumentParser(description='Train Two-Tower models')
     
-    # Data arguments
+    # Data preprocessing arguments
     parser.add_argument('--ratings-path', type=str, default='../../ml-32m/ratings.csv',
-                       help='Path to ratings CSV file')
+                       help='Path to ratings CSV file (userId, movieId, rating, timestamp)')
     parser.add_argument('--movies-path', type=str, default='../../ml-32m/movies.csv',
-                       help='Path to movies CSV file')
+                       help='Path to movies CSV file with metadata (movieId, title, genres)')
     parser.add_argument('--min-interactions', type=int, default=20,
-                       help='Minimum interactions per user/item')
+                       help='Minimum interactions per user/item (filter sparse entities)')
     
-    # Model arguments
+    # Model architecture arguments
     parser.add_argument('--model-type', type=str, default='enhanced',
                        choices=['simple', 'enhanced', 'multitask', 'collaborative'],
-                       help='Type of Two-Tower model')
+                       help='Two-Tower model variant to train')
     parser.add_argument('--embedding-dim', type=int, default=128,
-                       help='Embedding dimension')
+                       help='Final embedding dimension for both towers')
     parser.add_argument('--hidden-layers', type=int, nargs='+', default=[512, 256, 128],
-                       help='Hidden layer sizes')
+                       help='Hidden layer dimensions for tower networks')
     parser.add_argument('--dropout', type=float, default=0.2,
-                       help='Dropout rate')
+                       help='Dropout rate for regularization')
     parser.add_argument('--use-batch-norm', action='store_true', default=True,
-                       help='Use batch normalization')
+                       help='Use batch normalization in tower networks')
     parser.add_argument('--use-cross-attention', action='store_true',
-                       help='Use cross-attention (enhanced model)')
+                       help='Enable cross-attention between towers (enhanced model only)')
     
-    # Multi-task arguments
+    # Multi-task learning arguments
     parser.add_argument('--task-heads', type=str, nargs='+', default=['rating', 'click'],
-                       help='Task heads for multi-task model')
+                       help='Prediction tasks for multi-task model (rating, click, etc.)')
     
-    # Training arguments
+    # Training optimization arguments
     parser.add_argument('--epochs', type=int, default=50,
-                       help='Number of training epochs')
+                       help='Maximum number of training epochs')
     parser.add_argument('--batch-size', type=int, default=1024,
-                       help='Batch size')
+                       help='Training batch size (larger for stable two-tower training)')
     parser.add_argument('--learning-rate', type=float, default=0.001,
-                       help='Learning rate')
+                       help='Adam optimizer learning rate')
     parser.add_argument('--weight-decay', type=float, default=1e-5,
-                       help='Weight decay')
+                       help='L2 regularization weight decay')
     parser.add_argument('--patience', type=int, default=10,
-                       help='Early stopping patience')
+                       help='Early stopping patience (epochs without improvement)')
     
-    # Data processing
+    # Data processing and sampling
     parser.add_argument('--negative-sampling', action='store_true', default=True,
-                       help='Use negative sampling')
+                       help='Add negative samples for implicit feedback training')
     parser.add_argument('--neg-ratio', type=float, default=2.0,
-                       help='Negative to positive sample ratio')
+                       help='Ratio of negative to positive samples')
     
     # System arguments
     parser.add_argument('--device', type=str, default='auto',
@@ -100,21 +112,31 @@ def parse_args():
     parser.add_argument('--experiment-name', type=str, default=None,
                        help='Experiment name')
     
-    # Evaluation
+    # Evaluation and metrics
     parser.add_argument('--evaluate-retrieval', action='store_true',
-                       help='Evaluate retrieval metrics')
+                       help='Enable comprehensive retrieval evaluation (Hit Rate, NDCG, MRR)')
     parser.add_argument('--top-k', type=int, nargs='+', default=[5, 10, 20, 50],
-                       help='Top-k values for retrieval evaluation')
+                       help='Top-k values for retrieval evaluation metrics')
     parser.add_argument('--build-index', action='store_true', default=True,
-                       help='Build FAISS index for efficient retrieval')
+                       help='Use FAISS index for efficient similarity search evaluation')
     
     return parser.parse_args()
 
 
 def create_model(model_type: str, config: dict, args) -> torch.nn.Module:
-    """Create Two-Tower model based on type"""
+    """Factory function to create Two-Tower model based on specified architecture type
+    
+    Args:
+        model_type: Architecture variant ('simple', 'enhanced', 'multitask', 'collaborative')
+        config: Model configuration from data loader (feature dimensions, vocab sizes)
+        args: Command-line arguments with hyperparameters
+    
+    Returns:
+        Initialized Two-Tower model ready for training
+    """
     if model_type == 'simple':
-        # Simple model with flattened features
+        # Basic Two-Tower model with flattened feature vectors
+        # All features are concatenated into dense vectors for each tower
         user_feature_size = config['user_numerical_dim'] + len(config['user_categorical_dims'])
         item_feature_size = config['item_numerical_dim'] + len(config['item_categorical_dims'])
         
@@ -128,6 +150,8 @@ def create_model(model_type: str, config: dict, args) -> torch.nn.Module:
         )
         
     elif model_type == 'enhanced':
+        # Enhanced model with separate categorical/numerical feature handling
+        # Uses embedding layers for categorical features and can include cross-attention
         model = EnhancedTwoTowerModel(
             user_categorical_dims=config['user_categorical_dims'],
             user_numerical_dim=config['user_numerical_dim'],
@@ -140,11 +164,12 @@ def create_model(model_type: str, config: dict, args) -> torch.nn.Module:
         )
         
     elif model_type == 'multitask':
-        # Simple feature dimensions for multi-task
+        # Multi-task model for joint optimization of multiple objectives
+        # Shares tower representations but has task-specific prediction heads
         user_feature_size = config['user_numerical_dim'] + len(config['user_categorical_dims'])
         item_feature_size = config['item_numerical_dim'] + len(config['item_categorical_dims'])
         
-        # Create task heads dictionary
+        # Create task heads dictionary (each task outputs single value)
         task_heads = {task: 1 for task in args.task_heads}
         
         model = MultiTaskTwoTowerModel(
@@ -157,6 +182,8 @@ def create_model(model_type: str, config: dict, args) -> torch.nn.Module:
         )
         
     elif model_type == 'collaborative':
+        # Hybrid model combining collaborative filtering and content-based features
+        # Uses both learned embeddings from interactions and content features
         user_feature_size = config['user_numerical_dim'] + len(config['user_categorical_dims'])
         item_feature_size = config['item_numerical_dim'] + len(config['item_categorical_dims'])
         
@@ -198,19 +225,19 @@ def main():
         )
     
     try:
-        # Load data
-        logger.info("Loading and preprocessing data...")
+        # Load and preprocess data with comprehensive feature engineering
+        logger.info("Loading and preprocessing data for two-tower training...")
         data_loader = TwoTowerDataLoader(
             ratings_path=args.ratings_path,
             movies_path=args.movies_path,
-            min_interactions=args.min_interactions
+            min_interactions=args.min_interactions  # Filter sparse users/items
         )
         
-        # Create data loaders
+        # Create PyTorch data loaders with model-specific formatting
         train_loader, val_loader, test_loader = data_loader.create_data_loaders(
             batch_size=args.batch_size,
             num_workers=args.num_workers,
-            model_type=args.model_type
+            model_type=args.model_type  # Determines feature format (simple vs enhanced)
         )
         
         # Get model config
@@ -229,14 +256,14 @@ def main():
             weight_decay=args.weight_decay
         )
         
-        # Train model
-        logger.info("Starting training...")
+        # Train model with early stopping and checkpointing
+        logger.info("Starting two-tower model training...")
         history = trainer.train(
             train_loader=train_loader,
             val_loader=val_loader,
             epochs=args.epochs,
-            patience=args.patience,
-            save_dir=args.save_dir
+            patience=args.patience,  # Early stopping for optimal generalization
+            save_dir=args.save_dir   # Save best model and training artifacts
         )
         
         logger.info(f"Training completed. Best validation loss: {trainer.best_val_loss:.4f}")
@@ -249,25 +276,25 @@ def main():
         for metric, value in test_metrics.items():
             logger.info(f"  {metric}: {value:.4f}")
         
-        # Retrieval evaluation if requested
+        # Comprehensive retrieval evaluation if requested
         if args.evaluate_retrieval:
-            logger.info("Evaluating retrieval metrics...")
+            logger.info("Evaluating retrieval performance with FAISS-based similarity search...")
             evaluator = TwoTowerEvaluator(model, device)
             
-            # Retrieval metrics
+            # Retrieval metrics: Hit Rate, NDCG, MRR at multiple k values
             retrieval_metrics = evaluator.evaluate_retrieval(
                 test_loader, 
-                k_values=args.top_k,
-                build_index=args.build_index
+                k_values=args.top_k,        # Multiple k values for comprehensive evaluation
+                build_index=args.build_index # Use FAISS for efficient search
             )
             
             logger.info("Retrieval Results:")
             for metric, value in retrieval_metrics.items():
                 logger.info(f"  {metric}: {value:.4f}")
             
-            # Embedding analysis
+            # Analyze learned embedding quality and distribution
             embedding_analysis = evaluator.analyze_embeddings(test_loader)
-            logger.info("Embedding Analysis:")
+            logger.info("Embedding Quality Analysis:")
             for category, stats in embedding_analysis.items():
                 logger.info(f"  {category}: {stats}")
             
@@ -282,10 +309,11 @@ def main():
             wandb.log(all_metrics)
             wandb.log({"training_history": history})
         
-        # Save preprocessors and metrics
+        # Save all artifacts for reproducibility and deployment
         save_path = Path(args.save_dir)
-        data_loader.save_preprocessors(save_path / 'preprocessors.pkl')
+        data_loader.save_preprocessors(save_path / 'preprocessors.pkl')  # Encoders and scalers
         
+        # Save final evaluation metrics for comparison and reporting
         import json
         with open(save_path / 'final_metrics.json', 'w') as f:
             json.dump(all_metrics, f, indent=2, default=str)

@@ -1,3 +1,7 @@
+# Two-Tower/Dual-Encoder Model Architectures for CineSync v2
+# Implements various two-tower models for large-scale recommendation systems
+# Based on the dual-encoder paradigm for efficient candidate retrieval and ranking
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -7,8 +11,18 @@ import numpy as np
 
 class TwoTowerModel(nn.Module):
     """
-    Two-Tower/Dual-Encoder model for large-scale recommendation systems.
-    Separate encoding towers for users and items with efficient dot-product similarity.
+    Standard Two-Tower/Dual-Encoder model for large-scale recommendation systems.
+    
+    The two-tower architecture separates user and item encoding into independent towers,
+    enabling efficient retrieval through dot-product similarity computation. This design
+    allows for pre-computing item embeddings and using approximate nearest neighbor search
+    for real-time candidate generation at scale.
+    
+    Key benefits:
+    - Scalable to millions of users/items
+    - Enables efficient approximate nearest neighbor search
+    - Allows for separate optimization of user and item representations
+    - Supports both content-based and collaborative signals
     """
     
     def __init__(self, user_features_dim: int, item_features_dim: int, 
@@ -28,43 +42,52 @@ class TwoTowerModel(nn.Module):
         self.embedding_dim = embedding_dim
         self.use_batch_norm = use_batch_norm
         
-        # User tower
+        # User tower: encodes user features into fixed-size embeddings
+        # Independent from item tower to enable efficient candidate retrieval
         self.user_tower = self._build_tower(
             user_features_dim, hidden_layers, embedding_dim, dropout, "user"
         )
         
-        # Item tower
+        # Item tower: encodes item features into fixed-size embeddings
+        # Can be pre-computed for all items and cached for fast retrieval
         self.item_tower = self._build_tower(
             item_features_dim, hidden_layers, embedding_dim, dropout, "item"
         )
         
-        # Temperature parameter for similarity scaling
+        # Temperature parameter for similarity scaling (learnable)
+        # Controls the sharpness of the similarity distribution
+        # Lower temperature = sharper predictions, higher temperature = smoother
         self.temperature = nn.Parameter(torch.ones(1) * 0.1)
         
         self._init_weights()
     
     def _build_tower(self, input_dim: int, hidden_layers: List[int], 
                     output_dim: int, dropout: float, tower_name: str) -> nn.Module:
-        """Build a tower (user or item encoder)"""
+        """Build a deep neural network tower (user or item encoder)
+        
+        Creates a multi-layer perceptron with batch normalization, ReLU activation,
+        and dropout for regularization. The final layer is L2-normalized to enable
+        cosine similarity computation through dot products.
+        """
         layers = []
         
-        # Input layer
+        # Start with input dimension
         prev_dim = input_dim
         
-        # Hidden layers
+        # Build hidden layers with standard deep learning components
         for hidden_dim in hidden_layers:
-            layers.append(nn.Linear(prev_dim, hidden_dim))
+            layers.append(nn.Linear(prev_dim, hidden_dim))  # Linear transformation
             
             if self.use_batch_norm:
-                layers.append(nn.BatchNorm1d(hidden_dim))
+                layers.append(nn.BatchNorm1d(hidden_dim))   # Normalize activations
             
-            layers.append(nn.ReLU())
-            layers.append(nn.Dropout(dropout))
+            layers.append(nn.ReLU())                        # Non-linear activation
+            layers.append(nn.Dropout(dropout))             # Regularization
             prev_dim = hidden_dim
         
-        # Output layer (embedding)
-        layers.append(nn.Linear(prev_dim, output_dim))
-        layers.append(nn.LayerNorm(output_dim))  # Normalize final embeddings
+        # Final embedding layer with normalization
+        layers.append(nn.Linear(prev_dim, output_dim))     # Project to embedding space
+        layers.append(nn.LayerNorm(output_dim))            # Normalize final embeddings for stable training
         
         return nn.Sequential(*layers)
     
@@ -77,15 +100,31 @@ class TwoTowerModel(nn.Module):
                     nn.init.zeros_(module.bias)
     
     def encode_users(self, user_features: torch.Tensor) -> torch.Tensor:
-        """Encode user features into embeddings"""
+        """Encode user features into normalized embeddings
+        
+        Args:
+            user_features: Raw user feature vectors
+            
+        Returns:
+            L2-normalized user embeddings for cosine similarity computation
+        """
         user_embeddings = self.user_tower(user_features)
-        # L2 normalize for cosine similarity
+        # L2 normalize enables cosine similarity via dot product
+        # ||u|| = ||v|| = 1, so u·v = cos(θ) where θ is the angle between vectors
         return F.normalize(user_embeddings, p=2, dim=1)
     
     def encode_items(self, item_features: torch.Tensor) -> torch.Tensor:
-        """Encode item features into embeddings"""
+        """Encode item features into normalized embeddings
+        
+        Args:
+            item_features: Raw item feature vectors
+            
+        Returns:
+            L2-normalized item embeddings for cosine similarity computation
+        """
         item_embeddings = self.item_tower(item_features)
-        # L2 normalize for cosine similarity
+        # L2 normalize enables cosine similarity via dot product
+        # These embeddings can be pre-computed and cached for all items
         return F.normalize(item_embeddings, p=2, dim=1)
     
     def forward(self, user_features: torch.Tensor, item_features: torch.Tensor) -> torch.Tensor:
@@ -102,10 +141,12 @@ class TwoTowerModel(nn.Module):
         user_embeddings = self.encode_users(user_features)
         item_embeddings = self.encode_items(item_features)
         
-        # Compute dot product similarity
+        # Compute dot product similarity (cosine similarity for normalized vectors)
+        # For normalized vectors: u·v = ||u|| ||v|| cos(θ) = cos(θ)
         similarities = torch.sum(user_embeddings * item_embeddings, dim=1)
         
-        # Scale by temperature
+        # Scale by learnable temperature parameter
+        # Lower temperature sharpens the distribution, higher temperature smooths it
         similarities = similarities / self.temperature
         
         return similarities
@@ -113,7 +154,11 @@ class TwoTowerModel(nn.Module):
     def compute_similarity_matrix(self, user_features: torch.Tensor, 
                                  item_features: torch.Tensor) -> torch.Tensor:
         """
-        Compute similarity matrix between all users and items.
+        Compute full similarity matrix between all users and items.
+        
+        Useful for batch evaluation and analysis, but not typically used in production
+        due to memory constraints. For large-scale systems, use approximate nearest
+        neighbor search with pre-computed item embeddings instead.
         
         Args:
             user_features: Tensor of shape (num_users, user_features_dim)
@@ -125,16 +170,26 @@ class TwoTowerModel(nn.Module):
         user_embeddings = self.encode_users(user_features)
         item_embeddings = self.encode_items(item_features)
         
-        # Compute all pairwise similarities
-        similarities = torch.matmul(user_embeddings, item_embeddings.T)
-        similarities = similarities / self.temperature
+        # Compute all pairwise similarities via matrix multiplication
+        # For normalized embeddings, this gives cosine similarities
+        similarities = torch.matmul(user_embeddings, item_embeddings.T)  # (num_users, num_items)
+        similarities = similarities / self.temperature  # Apply temperature scaling
         
         return similarities
 
 
 class EnhancedTwoTowerModel(nn.Module):
     """
-    Enhanced Two-Tower model with additional features like attention and cross-tower interactions.
+    Enhanced Two-Tower model with sophisticated feature handling and cross-tower interactions.
+    
+    Extends the basic two-tower architecture with:
+    - Separate handling of categorical and numerical features
+    - Adaptive embedding sizes for categorical features
+    - Optional cross-attention mechanism between towers
+    - More sophisticated feature fusion strategies
+    
+    This model sacrifices some of the independence of the basic two-tower model
+    but gains expressiveness through cross-tower interactions.
     """
     
     def __init__(self, user_categorical_dims: Dict[str, int], user_numerical_dim: int,
@@ -157,12 +212,14 @@ class EnhancedTwoTowerModel(nn.Module):
         self.embedding_dim = embedding_dim
         self.use_cross_attention = use_cross_attention
         
-        # User embeddings for categorical features
+        # User embeddings for categorical features with adaptive sizing
         self.user_categorical_embeddings = nn.ModuleDict()
         user_cat_total_dim = 0
         
         for feature_name, vocab_size in user_categorical_dims.items():
-            emb_dim = min(50, (vocab_size + 1) // 2)  # Adaptive embedding size
+            # Adaptive embedding size based on vocabulary size
+            # Heuristic: sqrt(vocab_size) but capped at 50 dimensions
+            emb_dim = min(50, (vocab_size + 1) // 2)
             self.user_categorical_embeddings[feature_name] = nn.Embedding(vocab_size, emb_dim)
             user_cat_total_dim += emb_dim
         
@@ -185,10 +242,12 @@ class EnhancedTwoTowerModel(nn.Module):
         # Item tower
         self.item_tower = self._build_tower(item_total_dim, hidden_layers, embedding_dim, dropout)
         
-        # Cross-attention mechanism
+        # Cross-attention mechanism for tower interactions
+        # Allows user and item towers to attend to each other's representations
+        # This breaks the independence but can improve accuracy
         if use_cross_attention:
-            self.user_attention = nn.MultiheadAttention(embedding_dim, 8, batch_first=True)
-            self.item_attention = nn.MultiheadAttention(embedding_dim, 8, batch_first=True)
+            self.user_attention = nn.MultiheadAttention(embedding_dim, 8, batch_first=True)  # User attends to items
+            self.item_attention = nn.MultiheadAttention(embedding_dim, 8, batch_first=True)  # Item attends to users
         
         # Temperature scaling
         self.temperature = nn.Parameter(torch.ones(1) * 0.1)
@@ -287,21 +346,23 @@ class EnhancedTwoTowerModel(nn.Module):
         user_embeddings = self.encode_users(user_categorical, user_numerical)
         item_embeddings = self.encode_items(item_categorical, item_numerical)
         
-        # Apply cross-attention if enabled
+        # Apply cross-attention if enabled (breaks tower independence)
         if self.use_cross_attention:
-            # User attention over items
+            # User tower attends to item representations
+            # Query: user, Key/Value: item - "what items should this user focus on?"
             user_emb_attended, _ = self.user_attention(
-                user_embeddings.unsqueeze(1), 
-                item_embeddings.unsqueeze(1),
-                item_embeddings.unsqueeze(1)
+                user_embeddings.unsqueeze(1),    # Query: user embeddings
+                item_embeddings.unsqueeze(1),    # Key: item embeddings  
+                item_embeddings.unsqueeze(1)     # Value: item embeddings
             )
             user_embeddings = user_emb_attended.squeeze(1)
             
-            # Item attention over users
+            # Item tower attends to user representations
+            # Query: item, Key/Value: user - "what users should this item focus on?"
             item_emb_attended, _ = self.item_attention(
-                item_embeddings.unsqueeze(1),
-                user_embeddings.unsqueeze(1), 
-                user_embeddings.unsqueeze(1)
+                item_embeddings.unsqueeze(1),    # Query: item embeddings
+                user_embeddings.unsqueeze(1),    # Key: user embeddings
+                user_embeddings.unsqueeze(1)     # Value: user embeddings
             )
             item_embeddings = item_emb_attended.squeeze(1)
         
@@ -314,7 +375,15 @@ class EnhancedTwoTowerModel(nn.Module):
 
 class MultiTaskTwoTowerModel(nn.Module):
     """
-    Multi-task Two-Tower model that can predict ratings, clicks, and other objectives jointly.
+    Multi-task Two-Tower model for joint optimization of multiple objectives.
+    
+    Extends the two-tower architecture to predict multiple targets simultaneously:
+    - Rating prediction (regression)
+    - Click prediction (binary classification)
+    - Custom objectives through task-specific heads
+    
+    This approach leverages shared representations while allowing task-specific
+    optimization, often leading to better generalization than single-task models.
     """
     
     def __init__(self, user_features_dim: int, item_features_dim: int,
@@ -338,15 +407,17 @@ class MultiTaskTwoTowerModel(nn.Module):
         self.user_tower = self._build_tower(user_features_dim, hidden_layers, embedding_dim, dropout)
         self.item_tower = self._build_tower(item_features_dim, hidden_layers, embedding_dim, dropout)
         
-        # Task-specific heads
+        # Task-specific prediction heads
+        # Each task gets its own network for specialized predictions
         self.task_networks = nn.ModuleDict()
         
         for task_name, output_dim in self.task_heads.items():
+            # Task head operates on concatenated user + item embeddings
             self.task_networks[task_name] = nn.Sequential(
-                nn.Linear(embedding_dim * 2, embedding_dim),  # Combined user + item embedding
-                nn.ReLU(),
-                nn.Dropout(dropout),
-                nn.Linear(embedding_dim, output_dim)
+                nn.Linear(embedding_dim * 2, embedding_dim),  # Fusion layer
+                nn.ReLU(),                                    # Non-linearity
+                nn.Dropout(dropout),                         # Regularization
+                nn.Linear(embedding_dim, output_dim)         # Task-specific output
             )
         
         # Shared similarity computation
@@ -401,25 +472,28 @@ class MultiTaskTwoTowerModel(nn.Module):
         # Compute base similarity
         similarity = torch.sum(user_embeddings * item_embeddings, dim=1) / self.temperature
         
-        # Task-specific predictions
-        predictions = {'similarity': similarity}
+        # Multi-task predictions from shared representations
+        predictions = {'similarity': similarity}  # Base similarity always computed
         
-        # Combined embedding for task heads
+        # Combine user and item embeddings for task-specific heads
         combined_embedding = torch.cat([user_embeddings, item_embeddings], dim=1)
         
+        # Compute predictions for requested tasks
         tasks_to_compute = tasks or list(self.task_heads.keys())
         
         for task_name in tasks_to_compute:
             if task_name in self.task_networks:
                 task_output = self.task_networks[task_name](combined_embedding)
                 
+                # Apply task-specific output transformations
                 if task_name == 'rating':
-                    # Rating prediction (0-5 scale)
+                    # Rating prediction: sigmoid scaled to 0-5 range
                     predictions[task_name] = torch.sigmoid(task_output) * 5.0
                 elif task_name == 'click':
-                    # Click prediction (0-1 probability)
+                    # Click prediction: sigmoid for probability
                     predictions[task_name] = torch.sigmoid(task_output)
                 else:
+                    # Custom tasks: raw output
                     predictions[task_name] = task_output
         
         return predictions
@@ -427,7 +501,13 @@ class MultiTaskTwoTowerModel(nn.Module):
 
 class CollaborativeTwoTowerModel(nn.Module):
     """
-    Two-Tower model that incorporates collaborative signals through user/item embeddings.
+    Hybrid Two-Tower model combining collaborative filtering and content-based features.
+    
+    Integrates both collaborative signals (learned user/item embeddings) and content-based
+    features (metadata, demographics) into unified user and item representations.
+    This approach gets the best of both worlds:
+    - Collaborative signals capture implicit user preferences and item similarities
+    - Content features provide cold-start capability and interpretability
     """
     
     def __init__(self, num_users: int, num_items: int, user_features_dim: int, 
@@ -447,11 +527,13 @@ class CollaborativeTwoTowerModel(nn.Module):
         
         self.embedding_dim = embedding_dim
         
-        # Collaborative embeddings
+        # Collaborative embeddings (learned from interaction data)
+        # These capture latent user preferences and item characteristics
         self.user_collaborative_embedding = nn.Embedding(num_users, embedding_dim)
         self.item_collaborative_embedding = nn.Embedding(num_items, embedding_dim)
         
-        # Content towers
+        # Content-based towers (process metadata features)
+        # These provide cold-start capability and feature interpretability
         self.user_content_tower = self._build_tower(
             user_features_dim, hidden_layers, embedding_dim, dropout
         )
@@ -459,13 +541,14 @@ class CollaborativeTwoTowerModel(nn.Module):
             item_features_dim, hidden_layers, embedding_dim, dropout
         )
         
-        # Fusion layers
+        # Fusion layers to combine collaborative and content signals
+        # Learns optimal weighting between interaction patterns and content features
         self.user_fusion = nn.Sequential(
-            nn.Linear(embedding_dim * 2, embedding_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(embedding_dim, embedding_dim),
-            nn.LayerNorm(embedding_dim)
+            nn.Linear(embedding_dim * 2, embedding_dim),  # Combine collab + content
+            nn.ReLU(),                                    # Non-linear combination
+            nn.Dropout(dropout),                         # Regularization
+            nn.Linear(embedding_dim, embedding_dim),     # Final projection
+            nn.LayerNorm(embedding_dim)                  # Stabilize training
         )
         
         self.item_fusion = nn.Sequential(
@@ -507,28 +590,44 @@ class CollaborativeTwoTowerModel(nn.Module):
                     nn.init.zeros_(module.bias)
     
     def encode_users(self, user_ids: torch.Tensor, user_features: torch.Tensor) -> torch.Tensor:
-        """Encode users using both collaborative and content signals"""
-        # Collaborative embedding
+        """Encode users using both collaborative and content signals
+        
+        Args:
+            user_ids: User IDs for collaborative embeddings
+            user_features: Content-based user features
+            
+        Returns:
+            Fused user embeddings combining both signal types
+        """
+        # Collaborative embedding: learned from user interaction patterns
         user_collab_emb = self.user_collaborative_embedding(user_ids)
         
-        # Content embedding
+        # Content embedding: derived from user demographics/metadata
         user_content_emb = self.user_content_tower(user_features)
         
-        # Fuse collaborative and content signals
+        # Fuse both signals through learned combination
         combined = torch.cat([user_collab_emb, user_content_emb], dim=1)
         user_embedding = self.user_fusion(combined)
         
         return F.normalize(user_embedding, p=2, dim=1)
     
     def encode_items(self, item_ids: torch.Tensor, item_features: torch.Tensor) -> torch.Tensor:
-        """Encode items using both collaborative and content signals"""
-        # Collaborative embedding
+        """Encode items using both collaborative and content signals
+        
+        Args:
+            item_ids: Item IDs for collaborative embeddings
+            item_features: Content-based item features (genres, metadata)
+            
+        Returns:
+            Fused item embeddings combining both signal types
+        """
+        # Collaborative embedding: learned from item interaction patterns
         item_collab_emb = self.item_collaborative_embedding(item_ids)
         
-        # Content embedding  
+        # Content embedding: derived from item metadata (genres, descriptions, etc.)
         item_content_emb = self.item_content_tower(item_features)
         
-        # Fuse collaborative and content signals
+        # Fuse both signals through learned combination
         combined = torch.cat([item_collab_emb, item_content_emb], dim=1)
         item_embedding = self.item_fusion(combined)
         

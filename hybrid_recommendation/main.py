@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
+# CineSync v2 - Hybrid Recommendation System Main Training Script
 # FIXED: run_training_pytorch.py - Proper ID mapping to prevent non-existent movie recommendations
+# 
+# This is the main training script for the CineSync movie recommendation system.
+# It implements a hybrid approach combining collaborative filtering and content-based
+# filtering with proper ID mapping to ensure only real movies are recommended.
+#
+# Key features:
+# - Hybrid neural collaborative filtering model
+# - Proper ID mapping to prevent out-of-bounds errors
+# - Multiple dataset support (MovieLens, Netflix, TMDB)
+# - GPU acceleration with mixed precision training
+# - WandB integration for experiment tracking
+# - Early stopping and model checkpointing
 
 import os
 import sys
@@ -22,7 +35,14 @@ from pathlib import Path
 import wandb
 
 def check_datasets_before_training():
-    """Check if required datasets are available before starting training."""
+    """Check if required datasets are available before starting training.
+    
+    Validates that essential MovieLens datasets are present before beginning
+    the training process. Provides helpful guidance if datasets are missing.
+    
+    Returns:
+        bool: True if all required datasets are found, False otherwise
+    """
     print("🔍 Checking datasets before training...")
     
     # Check for required dataset files
@@ -105,6 +125,18 @@ def create_id_mappings(ratings_df, movies_df):
     """
     CRITICAL FIX: Create proper ID mappings to prevent out-of-bounds errors
     Maps original IDs to contiguous 0-based indices for embeddings
+    
+    This function solves a critical issue where original MovieLens IDs are not
+    contiguous (e.g., 1, 3, 6, 11...) which causes embedding layer errors.
+    We map them to contiguous indices (0, 1, 2, 3...) for safe PyTorch usage.
+    
+    Args:
+        ratings_df: DataFrame with user ratings
+        movies_df: DataFrame with movie information
+        
+    Returns:
+        tuple: (updated_ratings_df, updated_movies_df, mappings_dict)
+               or (None, None, None) if mapping fails
     """
     logger.info("Creating ID mappings to prevent out-of-bounds errors")
     
@@ -278,7 +310,19 @@ def process_ratings_file(file_path, format_type='movielens'):
 
 
 class MovieRecommendationSystem:
-    """FIXED: Recommendation system that only recommends REAL movies"""
+    """FIXED: Recommendation system that only recommends REAL movies
+    
+    This class provides the inference interface for the trained recommendation
+    model. It ensures that only movies present in the training dataset are
+    recommended, preventing hallucinated or non-existent movie suggestions.
+    
+    Key features:
+    - Smart candidate generation instead of scoring all movies
+    - Multi-strategy recommendation (genre-based, popular, diverse)
+    - Proper ID mapping consistency with training
+    - Fallback mechanisms for new users
+    - Real movie validation and lookup
+    """
     
     def __init__(self, config):
         self.model_dir = config.model.models_dir
@@ -371,6 +415,18 @@ class MovieRecommendationSystem:
     def get_user_recommendations(self, user_id, num_recommendations=10, exclude_seen=True):
         """
         IMPROVED: Get recommendations for a user with intelligent candidate generation
+        
+        Instead of scoring all movies (expensive), this method uses smart candidate
+        generation to pre-filter to the most promising movies, then scores only those.
+        This provides significant performance improvements while maintaining quality.
+        
+        Args:
+            user_id: User ID for recommendations
+            num_recommendations: Number of recommendations to return
+            exclude_seen: Whether to exclude movies user has already rated
+            
+        Returns:
+            List[Dict]: List of movie recommendations with metadata
         """
         try:
             # Check if user exists in our mappings
@@ -665,7 +721,11 @@ def test_recommendations():
         logger.error(f"Error in test_recommendations: {e}")
 
 class MovieRatingDataset(Dataset):
-    """FIXED: PyTorch Dataset with proper ID mapping"""
+    """FIXED: PyTorch Dataset with proper ID mapping
+    
+    PyTorch Dataset class that properly handles the mapped user and movie indices
+    along with genre features for training the hybrid recommendation model.
+    """
     
     def __init__(self, user_indices, movie_indices, genre_features, ratings):
         self.user_indices = user_indices
@@ -685,7 +745,19 @@ class MovieRatingDataset(Dataset):
         )
 
 def process_and_prepare_data(data_files):
-    """FIXED: Process and prepare data with proper ID mapping"""
+    """FIXED: Process and prepare data with proper ID mapping
+    
+    Main data preprocessing pipeline that loads, cleans, and prepares data
+    for training. Includes critical ID mapping to ensure embedding layer
+    compatibility and proper train/validation splitting.
+    
+    Args:
+        data_files: Dictionary mapping data types to file paths
+        
+    Returns:
+        tuple: (train_data, val_data, movies_df, genres_list, mappings)
+               All prepared for model training
+    """
     logger.info("Processing and preparing data for training")
     
     # Process movie data
@@ -778,7 +850,26 @@ def process_and_prepare_data(data_files):
     return train_data, val_data, movies_df, genres_list, mappings
 
 def train_model(train_data, val_data, movies_df, genres, mappings, device, epochs=30, batch_size=128, resume_from_checkpoint=None):
-    """FIXED: Train model with proper ID handling"""
+    """FIXED: Train model with proper ID handling
+    
+    Main training loop that creates and trains the hybrid recommendation model.
+    Includes mixed precision training, early stopping, checkpointing, and
+    comprehensive validation to ensure the model learns proper embeddings.
+    
+    Args:
+        train_data: Training dataset with mapped IDs
+        val_data: Validation dataset with mapped IDs  
+        movies_df: Movie metadata DataFrame
+        genres: List of unique genres for one-hot encoding
+        mappings: ID mapping dictionaries
+        device: PyTorch device (cuda/cpu)
+        epochs: Number of training epochs
+        batch_size: Training batch size
+        resume_from_checkpoint: Path to checkpoint file to resume from
+        
+    Returns:
+        tuple: (trained_model, training_history)
+    """
     logger.info(f"Starting model training with proper ID mapping")
     
     try:
@@ -1030,7 +1121,12 @@ def train_model(train_data, val_data, movies_df, genres, mappings, device, epoch
         return None, None
 
 def main():
-    """Main training function"""
+    """Main training function
+    
+    Entry point for the training script. Orchestrates the entire training
+    pipeline from dataset validation through model training and evaluation.
+    Includes comprehensive error handling and experiment tracking.
+    """
     # Check datasets before starting
     if not check_datasets_before_training():
         print("\n🛑 Training aborted due to missing datasets")

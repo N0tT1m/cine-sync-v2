@@ -1,6 +1,19 @@
 """
-Content Manager for CineSync v2 - Manages both Movie and TV Show models
-Handles model selection, cross-content recommendations, and unified inference
+Content Manager for CineSync v2 - Unified Multi-Content Recommendation System
+
+This module provides the core content management interface for CineSync, handling
+both movie and TV show recommendations through a unified API. It manages multiple
+specialized models and provides intelligent cross-content recommendations.
+
+Key Features:
+- Unified interface for movies and TV shows
+- Cross-content recommendations (movie preferences → TV suggestions)
+- Content-based fallbacks for new users
+- Smart candidate generation for performance
+- Multi-model management and coordination
+
+The LupeContentManager class serves as the main entry point for all recommendation
+operations in the CineSync system.
 """
 
 import torch
@@ -19,6 +32,17 @@ logger = logging.getLogger(__name__)
 class LupeContentManager:
     """
     Lupe AI - Unified content recommendation manager for movies and TV shows
+    
+    Central orchestrator for all content recommendation operations in CineSync.
+    Manages separate specialized models for movies and TV shows while providing
+    a unified interface and intelligent cross-content recommendations.
+    
+    This class handles:
+    - Loading and managing multiple recommendation models
+    - Routing requests to appropriate specialized models
+    - Cross-content preference transfer (movies ↔ TV shows)
+    - Content-based fallbacks for cold-start users
+    - Performance optimization through smart candidate generation
     """
     
     def __init__(self, models_dir: str = "models"):
@@ -37,7 +61,16 @@ class LupeContentManager:
         }
     
     def load_models(self, movie_model_path: str = None, tv_model_path: str = None):
-        """Load both movie and TV show models"""
+        """Load both movie and TV show models
+        
+        Initializes the specialized recommendation models for movies and TV shows.
+        Each model is trained on domain-specific data and optimized for its content type.
+        Also loads the necessary encoders and metadata for proper inference.
+        
+        Args:
+            movie_model_path: Path to movie model checkpoint (optional)
+            tv_model_path: Path to TV show model checkpoint (optional)
+        """
         
         # Load movie model
         if movie_model_path is None:
@@ -90,14 +123,18 @@ class LupeContentManager:
         """
         Get recommendations for a user
         
+        Main entry point for getting recommendations. Routes requests to the
+        appropriate specialized model(s) based on content_type and combines
+        results intelligently for mixed recommendations.
+        
         Args:
-            user_id: User ID
-            content_type: "movie", "tv", or "mixed"
-            top_k: Number of recommendations
+            user_id: User ID for personalized recommendations
+            content_type: "movie", "tv", or "mixed" for combined results
+            top_k: Number of recommendations to return
             **kwargs: Additional parameters (genres, similar_to, etc.)
             
         Returns:
-            List of recommendation dictionaries
+            List[Dict]: List of recommendation dictionaries with metadata
         """
         
         if content_type == "movie":
@@ -110,7 +147,20 @@ class LupeContentManager:
             raise ValueError(f"Unknown content type: {content_type}")
     
     def _get_movie_recommendations(self, user_id: int, top_k: int, **kwargs) -> List[Dict]:
-        """Get movie recommendations"""
+        """Get movie recommendations using the specialized movie model
+        
+        Uses the trained movie recommendation model to generate personalized
+        movie suggestions. Includes fallback to content-based recommendations
+        for users not seen during training.
+        
+        Args:
+            user_id: User ID for recommendations
+            top_k: Number of movies to recommend
+            **kwargs: Additional filtering parameters
+            
+        Returns:
+            List[Dict]: Movie recommendations with scores and metadata
+        """
         if self.movie_model is None:
             logger.warning("Movie model not loaded")
             return []
@@ -161,7 +211,20 @@ class LupeContentManager:
             return []
     
     def _get_tv_recommendations(self, user_id: int, top_k: int, **kwargs) -> List[Dict]:
-        """Get TV show recommendations"""
+        """Get TV show recommendations using the specialized TV model
+        
+        Uses the trained TV show recommendation model to generate personalized
+        TV show suggestions. Handles the different data format and features
+        specific to TV shows (seasons, episodes, etc.).
+        
+        Args:
+            user_id: User ID for recommendations
+            top_k: Number of TV shows to recommend
+            **kwargs: Additional filtering parameters
+            
+        Returns:
+            List[Dict]: TV show recommendations with scores and metadata
+        """
         if self.tv_model is None:
             logger.warning("TV model not loaded")
             return []
@@ -202,7 +265,20 @@ class LupeContentManager:
             return []
     
     def _get_mixed_recommendations(self, user_id: int, top_k: int, **kwargs) -> List[Dict]:
-        """Get mixed movie and TV show recommendations"""
+        """Get mixed movie and TV show recommendations
+        
+        Combines recommendations from both movie and TV models to provide
+        a diverse mix of content. Balances the results and ranks them by
+        predicted user preference scores.
+        
+        Args:
+            user_id: User ID for recommendations
+            top_k: Total number of mixed recommendations
+            **kwargs: Additional filtering parameters
+            
+        Returns:
+            List[Dict]: Mixed content recommendations sorted by score
+        """
         # Get both types of recommendations
         movie_count = top_k // 2
         tv_count = top_k - movie_count
@@ -238,7 +314,19 @@ class LupeContentManager:
                                         target_type: str, top_k: int = 10) -> List[Dict]:
         """
         Get recommendations for target_type based on user preferences in source_type
-        E.g., recommend TV shows based on movie preferences
+        
+        Innovative feature that transfers user preferences across content types.
+        For example, if a user likes action movies, this can recommend action TV shows
+        by analyzing genre preferences and applying them to the target domain.
+        
+        Args:
+            user_id: User ID for cross-content analysis
+            source_type: Content type to analyze preferences from ("movie" or "tv")
+            target_type: Content type to recommend ("movie" or "tv")
+            top_k: Number of cross-content recommendations
+            
+        Returns:
+            List[Dict]: Recommendations in target domain based on source preferences
         """
         
         if source_type == "movie" and target_type == "tv":
@@ -287,7 +375,19 @@ class LupeContentManager:
         return movie_recs[:top_k]
     
     def _encode_user_id(self, user_id: int, content_type: str) -> Optional[int]:
-        """Encode user ID for the specified content type"""
+        """Encode user ID for the specified content type
+        
+        Maps original user IDs to the encoded indices used by the models.
+        Each content type may have different user encodings based on which
+        users appear in that domain's training data.
+        
+        Args:
+            user_id: Original user ID
+            content_type: 'movie' or 'tv' to determine which encoder to use
+            
+        Returns:
+            Optional[int]: Encoded user ID, or None if user not in training data
+        """
         if content_type == 'movie' and self.movie_encoders:
             return self.movie_encoders.get('user_id', {}).get(user_id)
         elif content_type == 'tv' and self.tv_encoders:
@@ -424,7 +524,14 @@ class LupeContentManager:
         return []
     
     def is_ready(self) -> Dict[str, bool]:
-        """Check if models are ready for inference"""
+        """Check if models are ready for inference
+        
+        Validates that all necessary components are loaded and ready
+        for generating recommendations. Useful for health checks.
+        
+        Returns:
+            Dict[str, bool]: Status of each component
+        """
         return {
             'movie_model_loaded': self.movie_model is not None,
             'tv_model_loaded': self.tv_model is not None,
@@ -433,7 +540,14 @@ class LupeContentManager:
         }
     
     def get_model_info(self) -> Dict:
-        """Get information about loaded models"""
+        """Get information about loaded models
+        
+        Provides detailed information about the currently loaded models,
+        including metadata, parameter counts, and capabilities.
+        
+        Returns:
+            Dict: Comprehensive model information
+        """
         info = {
             'models_loaded': [],
             'total_parameters': 0

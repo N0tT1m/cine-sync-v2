@@ -1,3 +1,7 @@
+# Enhanced Two-Tower Model for CineSync v2
+# Advanced implementation with cross-attention, feature fusion, and multi-task learning
+# Optimized for RTX 4090 with mixed precision training support
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -7,20 +11,33 @@ import math
 
 
 class MultiHeadCrossAttention(nn.Module):
-    """Multi-head cross-attention mechanism for two-tower interaction"""
+    """Multi-head cross-attention mechanism for two-tower interaction
+    
+    Enables direct interaction between user and item towers through attention,
+    allowing the model to learn complex user-item relationships beyond simple
+    dot products. Essential for capturing nuanced preferences.
+    """
     
     def __init__(self, d_model: int, num_heads: int = 8, dropout: float = 0.1):
+        """Initialize multi-head cross-attention
+        
+        Args:
+            d_model: Model dimension size
+            num_heads: Number of attention heads for parallel processing
+            dropout: Dropout rate for regularization
+        """
         super(MultiHeadCrossAttention, self).__init__()
         assert d_model % num_heads == 0
         
         self.d_model = d_model
         self.num_heads = num_heads
-        self.d_k = d_model // num_heads
+        self.d_k = d_model // num_heads  # Dimension per attention head
         
-        self.w_q = nn.Linear(d_model, d_model, bias=False)
-        self.w_k = nn.Linear(d_model, d_model, bias=False)
-        self.w_v = nn.Linear(d_model, d_model, bias=False)
-        self.w_o = nn.Linear(d_model, d_model)
+        # Linear projections for query, key, and value transformations
+        self.w_q = nn.Linear(d_model, d_model, bias=False)  # Query projection
+        self.w_k = nn.Linear(d_model, d_model, bias=False)  # Key projection
+        self.w_v = nn.Linear(d_model, d_model, bias=False)  # Value projection
+        self.w_o = nn.Linear(d_model, d_model)              # Output projection
         
         self.dropout = nn.Dropout(dropout)
         self.layer_norm = nn.LayerNorm(d_model)
@@ -28,6 +45,7 @@ class MultiHeadCrossAttention(nn.Module):
         self._init_weights()
     
     def _init_weights(self):
+        """Initialize weights using Xavier uniform distribution for stable training"""
         for module in [self.w_q, self.w_k, self.w_v, self.w_o]:
             nn.init.xavier_uniform_(module.weight)
             
@@ -44,30 +62,35 @@ class MultiHeadCrossAttention(nn.Module):
         seq_len_q = query.size(1)
         seq_len_k = key.size(1)
         
-        # Linear transformations and reshape
+        # Linear transformations and reshape for multi-head attention
+        # Reshape: [batch, seq_len, d_model] -> [batch, num_heads, seq_len, d_k]
         Q = self.w_q(query).view(batch_size, seq_len_q, self.num_heads, self.d_k).transpose(1, 2)
         K = self.w_k(key).view(batch_size, seq_len_k, self.num_heads, self.d_k).transpose(1, 2)
         V = self.w_v(value).view(batch_size, seq_len_k, self.num_heads, self.d_k).transpose(1, 2)
         
-        # Scaled dot-product attention
+        # Scaled dot-product attention: softmax(QK^T/√d_k)V
+        # Scale by sqrt(d_k) to prevent softmax from saturating
         scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.d_k)
         
+        # Apply attention mask to prevent attending to padded positions
         if mask is not None:
-            scores = scores.masked_fill(mask == 0, -1e9)
+            scores = scores.masked_fill(mask == 0, -1e9)  # Large negative value
         
+        # Convert attention scores to probabilities and apply dropout
         attn_weights = F.softmax(scores, dim=-1)
-        attn_weights = self.dropout(attn_weights)
+        attn_weights = self.dropout(attn_weights)  # Dropout on attention weights
         
-        # Apply attention to values
+        # Apply attention weights to values: weighted sum of value vectors
         attn_output = torch.matmul(attn_weights, V)
         
-        # Concatenate heads and project
+        # Concatenate attention heads back to original dimension
+        # Reshape: [batch, num_heads, seq_len, d_k] -> [batch, seq_len, d_model]
         attn_output = attn_output.transpose(1, 2).contiguous().view(
             batch_size, seq_len_q, self.d_model
         )
-        output = self.w_o(attn_output)
+        output = self.w_o(attn_output)  # Final linear projection
         
-        # Residual connection and layer norm
+        # Residual connection and layer normalization for stable training
         return self.layer_norm(query + self.dropout(output))
 
 

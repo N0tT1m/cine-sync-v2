@@ -16,63 +16,91 @@ from .model import NeuralCollaborativeFiltering, SimpleNCF, DeepNCF
 class NCFTrainer:
     """
     Trainer class for Neural Collaborative Filtering models with comprehensive evaluation metrics.
+    
+    This trainer provides a complete training pipeline for NCF models including:
+    - Training loop with batch processing and gradient updates
+    - Validation monitoring with multiple metrics (RMSE, MAE, R²)
+    - Early stopping to prevent overfitting
+    - Model checkpointing and state management
+    - Comprehensive logging and progress tracking
+    
+    The trainer supports different NCF variants and automatically handles
+    models with or without additional features (e.g., genre embeddings).
     """
     
     def __init__(self, model: nn.Module, device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
                  learning_rate: float = 0.001, weight_decay: float = 1e-5):
         """
+        Initialize NCF trainer with model and training configuration.
+        
         Args:
-            model: NCF model to train
+            model: NCF model to train (SimpleNCF, NeuralCollaborativeFiltering, etc.)
             device: Device to train on ('cuda' or 'cpu')
-            learning_rate: Learning rate for optimizer
-            weight_decay: L2 regularization weight
+            learning_rate: Learning rate for Adam optimizer
+            weight_decay: L2 regularization weight for preventing overfitting
         """
         self.model = model.to(device)
         self.device = device
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
         
-        # Initialize optimizer and loss function
+        # Initialize Adam optimizer with L2 regularization
         self.optimizer = optim.Adam(
             self.model.parameters(), 
-            lr=learning_rate, 
-            weight_decay=weight_decay
+            lr=learning_rate,          # Learning rate for gradient updates
+            weight_decay=weight_decay  # L2 penalty for regularization
         )
+        # Use MSE loss for rating prediction (regression task)
         self.criterion = nn.MSELoss()
         
-        # Training history
-        self.train_losses = []
-        self.val_losses = []
-        self.val_rmses = []
-        self.val_maes = []
+        # Training history for monitoring and plotting
+        self.train_losses = []    # Training loss per epoch
+        self.val_losses = []      # Validation loss per epoch
+        self.val_rmses = []       # Validation RMSE per epoch
+        self.val_maes = []        # Validation MAE per epoch
         
         self.logger = logging.getLogger(__name__)
         
-        # Best model tracking
-        self.best_val_loss = float('inf')
-        self.best_model_state = None
-        self.patience_counter = 0
+        # Best model tracking for early stopping and checkpointing
+        self.best_val_loss = float('inf')  # Best validation loss seen
+        self.best_model_state = None       # Best model state dict
+        self.patience_counter = 0          # Epochs without improvement
     
     def train_epoch(self, train_loader: DataLoader) -> float:
-        """Train for one epoch"""
+        """Train for one epoch
+        
+        Executes one complete pass through the training data with:
+        - Forward pass through the model
+        - Loss computation and backpropagation
+        - Parameter updates with optimizer
+        - Automatic handling of different model architectures
+        
+        Args:
+            train_loader: DataLoader with training batches
+            
+        Returns:
+            float: Average training loss for the epoch
+        """
         self.model.train()
         total_loss = 0.0
         num_batches = 0
         
         for batch in train_loader:
-            # Move data to device
+            # Move batch data to appropriate device (GPU/CPU)
             user_ids = batch['user_id'].to(self.device)
             item_ids = batch['item_id'].to(self.device)
             ratings = batch['rating'].to(self.device)
             
-            # Forward pass
-            self.optimizer.zero_grad()
+            # Standard PyTorch training step
+            self.optimizer.zero_grad()  # Clear gradients from previous step
             
-            # Check if model uses genres
+            # Adaptive forward pass - handle models with/without genre features
             if 'genre_id' in batch and hasattr(self.model, 'genre_embedding'):
+                # Enhanced model with content-based features
                 genre_ids = batch['genre_id'].to(self.device)
                 predictions = self.model(user_ids, item_ids, genre_ids)
             else:
+                # Standard collaborative filtering model
                 predictions = self.model(user_ids, item_ids)
             
             # Compute loss
@@ -89,19 +117,33 @@ class NCFTrainer:
         return avg_loss
     
     def evaluate(self, val_loader: DataLoader) -> Dict[str, float]:
-        """Evaluate model on validation data"""
+        """Evaluate model on validation data
+        
+        Computes comprehensive evaluation metrics without updating model parameters:
+        - MSE Loss: Mean squared error for optimization
+        - RMSE: Root mean squared error (interpretable rating scale)
+        - MAE: Mean absolute error (robust to outliers)
+        - R²: Coefficient of determination (explained variance)
+        
+        Args:
+            val_loader: DataLoader with validation batches
+            
+        Returns:
+            Dict[str, float]: Dictionary of evaluation metrics
+        """
         self.model.eval()
         total_loss = 0.0
         predictions_list = []
         targets_list = []
         
-        with torch.no_grad():
+        with torch.no_grad():  # Disable gradient computation for efficiency
             for batch in val_loader:
+                # Move validation data to device
                 user_ids = batch['user_id'].to(self.device)
                 item_ids = batch['item_id'].to(self.device)
                 ratings = batch['rating'].to(self.device)
                 
-                # Forward pass
+                # Forward pass (same adaptive logic as training)
                 if 'genre_id' in batch and hasattr(self.model, 'genre_embedding'):
                     genre_ids = batch['genre_id'].to(self.device)
                     predictions = self.model(user_ids, item_ids, genre_ids)
@@ -120,7 +162,8 @@ class NCFTrainer:
         predictions_arr = np.array(predictions_list)
         targets_arr = np.array(targets_list)
         
-        # Convert back to original rating scale (0-1 -> 0.5-5.0)
+        # Convert normalized ratings back to original scale for interpretable metrics
+        # Assumes 0-1 normalized range maps to 0.5-5.0 MovieLens rating scale
         predictions_scaled = predictions_arr * 4.5 + 0.5
         targets_scaled = targets_arr * 4.5 + 0.5
         
@@ -134,25 +177,44 @@ class NCFTrainer:
         return metrics
     
     def _calculate_r2(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
-        """Calculate R-squared score"""
-        ss_res = np.sum((y_true - y_pred) ** 2)
-        ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
-        return 1 - (ss_res / ss_tot)
+        """Calculate R-squared score (coefficient of determination)
+        
+        R² measures the proportion of variance in the target variable
+        that's predictable from the input features. Higher values (closer to 1)
+        indicate better model performance.
+        
+        Args:
+            y_true: Ground truth ratings
+            y_pred: Predicted ratings
+            
+        Returns:
+            float: R-squared score (can be negative for very poor fits)
+        """
+        ss_res = np.sum((y_true - y_pred) ** 2)      # Residual sum of squares
+        ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)  # Total sum of squares
+        return 1 - (ss_res / ss_tot)  # R² = 1 - (SSres / SStot)
     
     def train(self, train_loader: DataLoader, val_loader: DataLoader, 
               epochs: int, patience: int = 10, save_dir: Optional[str] = None) -> Dict[str, List[float]]:
         """
         Train the model with early stopping and model checkpointing.
         
+        Implements a complete training loop with:
+        - Epoch-wise training and validation
+        - Early stopping based on validation loss
+        - Best model checkpointing
+        - Comprehensive metric tracking
+        - Progress logging and timing
+        
         Args:
-            train_loader: Training data loader
-            val_loader: Validation data loader
-            epochs: Maximum number of epochs
-            patience: Early stopping patience
-            save_dir: Directory to save model checkpoints
+            train_loader: Training data loader with user-item-rating batches
+            val_loader: Validation data loader for monitoring
+            epochs: Maximum number of epochs to train
+            patience: Early stopping patience (epochs without improvement)
+            save_dir: Directory to save model checkpoints and training history
         
         Returns:
-            Dictionary with training history
+            Dict[str, List[float]]: Training history with losses and metrics
         """
         if save_dir:
             save_path = Path(save_dir)
@@ -188,23 +250,25 @@ class NCFTrainer:
                 f"Time: {epoch_time:.2f}s"
             )
             
-            # Early stopping and model checkpointing
+            # Early stopping mechanism to prevent overfitting
             if val_metrics['loss'] < self.best_val_loss:
+                # New best model found - save state and reset patience
                 self.best_val_loss = val_metrics['loss']
                 self.best_model_state = self.model.state_dict().copy()
                 self.patience_counter = 0
                 
-                # Save best model
+                # Save checkpoint of best model
                 if save_dir:
                     self._save_checkpoint(save_path / 'best_model.pt', epoch, val_metrics)
             else:
+                # No improvement - increment patience counter
                 self.patience_counter += 1
                 
                 if self.patience_counter >= patience:
                     self.logger.info(f"Early stopping at epoch {epoch+1}")
                     break
         
-        # Restore best model
+        # Restore best model weights for final evaluation
         if self.best_model_state is not None:
             self.model.load_state_dict(self.best_model_state)
             self.logger.info("Restored best model weights")
@@ -221,14 +285,26 @@ class NCFTrainer:
         }
     
     def _save_checkpoint(self, filepath: Path, epoch: int, metrics: Dict[str, float]):
-        """Save model checkpoint"""
+        """Save model checkpoint with complete training state
+        
+        Saves all information needed to resume training or deploy the model:
+        - Model state dict (learned parameters)
+        - Optimizer state dict (for training resumption)
+        - Training metrics and epoch information
+        - Model configuration for reconstruction
+        
+        Args:
+            filepath: Path where checkpoint should be saved
+            epoch: Current training epoch
+            metrics: Current validation metrics
+        """
         checkpoint = {
             'epoch': epoch,
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
+            'model_state_dict': self.model.state_dict(),      # Learned parameters
+            'optimizer_state_dict': self.optimizer.state_dict(),  # Optimizer state
             'best_val_loss': self.best_val_loss,
-            'metrics': metrics,
-            'model_config': {
+            'metrics': metrics,                               # Current performance
+            'model_config': {                                 # Model architecture info
                 'model_class': self.model.__class__.__name__,
                 'num_users': getattr(self.model, 'num_users', None),
                 'num_items': getattr(self.model, 'num_items', None),
@@ -255,9 +331,20 @@ class NCFTrainer:
         self.logger.info(f"Saved training history to {filepath}")
     
     def load_checkpoint(self, filepath: str) -> Dict:
-        """Load model checkpoint"""
+        """Load model checkpoint and restore training state
+        
+        Restores the complete training state from a saved checkpoint,
+        allowing for training resumption or model deployment.
+        
+        Args:
+            filepath: Path to the checkpoint file
+            
+        Returns:
+            Dict: Loaded checkpoint data with metadata
+        """
         checkpoint = torch.load(filepath, map_location=self.device)
         
+        # Restore model and optimizer states
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         self.best_val_loss = checkpoint['best_val_loss']

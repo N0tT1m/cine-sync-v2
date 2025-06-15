@@ -6,6 +6,7 @@
 /tv/
 /kaggle_complete_dataset/
 /kaggle_dataset/
+/imdb/
 
 # Model files (generated during training)
 /models/*

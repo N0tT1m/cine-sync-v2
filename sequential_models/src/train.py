@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """
-Training script for Sequential Recommendation models.
+Comprehensive Training Script for Sequential Recommendation Models
+
+Supports training of multiple sequential architectures:
+- Standard RNN-based sequential models (LSTM/GRU)
+- Attention-based sequential models (SASRec-style)
+- Hierarchical sequential models (short/long-term)
+- Session-based recommendation models
+
+Includes comprehensive evaluation, experiment tracking with WandB,
+and flexible hyperparameter configuration through command-line arguments.
 """
 
 import argparse
@@ -23,7 +32,11 @@ from src.trainer import SequentialTrainer, SequentialEvaluator
 
 
 def setup_logging(log_level: str = "INFO"):
-    """Setup logging configuration"""
+    """Setup logging configuration for training monitoring
+    
+    Configures both console and file logging to track training progress,
+    model performance, and any issues during the training process.
+    """
     logging.basicConfig(
         level=getattr(logging, log_level.upper()),
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -35,53 +48,60 @@ def setup_logging(log_level: str = "INFO"):
 
 
 def parse_args():
-    """Parse command line arguments"""
+    """Parse comprehensive command line arguments for flexible training configuration
+    
+    Supports configuration of:
+    - Data preprocessing parameters
+    - Model architecture hyperparameters  
+    - Training optimization settings
+    - Evaluation and experiment tracking options
+    """
     parser = argparse.ArgumentParser(description='Train Sequential Recommendation models')
     
-    # Data arguments
+    # Data preprocessing arguments
     parser.add_argument('--ratings-path', type=str, default='../../ml-32m/ratings.csv',
-                       help='Path to ratings CSV file')
+                       help='Path to ratings CSV file (userId, movieId, rating, timestamp)')
     parser.add_argument('--min-interactions', type=int, default=20,
-                       help='Minimum interactions per user')
+                       help='Minimum interactions per user (filter cold users)')
     parser.add_argument('--min-seq-length', type=int, default=5,
-                       help='Minimum sequence length')
+                       help='Minimum sequence length to include in training')
     parser.add_argument('--max-seq-length', type=int, default=50,
-                       help='Maximum sequence length')
+                       help='Maximum sequence length (truncation point)')
     
-    # Model arguments
+    # Model architecture arguments
     parser.add_argument('--model-type', type=str, default='sequential',
                        choices=['sequential', 'attention', 'hierarchical', 'session'],
-                       help='Type of sequential model')
+                       help='Type of sequential model architecture')
     parser.add_argument('--embedding-dim', type=int, default=128,
-                       help='Item embedding dimension')
+                       help='Item embedding dimension (larger = more capacity)')
     parser.add_argument('--hidden-dim', type=int, default=256,
-                       help='Hidden dimension for RNN')
+                       help='Hidden dimension for RNN/attention layers')
     parser.add_argument('--num-layers', type=int, default=2,
-                       help='Number of RNN layers')
+                       help='Number of RNN layers (depth of network)')
     parser.add_argument('--num-heads', type=int, default=8,
                        help='Number of attention heads (for attention model)')
     parser.add_argument('--num-blocks', type=int, default=2,
-                       help='Number of attention blocks')
+                       help='Number of transformer/attention blocks')
     parser.add_argument('--dropout', type=float, default=0.2,
-                       help='Dropout rate')
+                       help='Dropout rate for regularization')
     parser.add_argument('--rnn-type', type=str, default='LSTM',
                        choices=['LSTM', 'GRU'],
-                       help='Type of RNN to use')
+                       help='Type of RNN cell (LSTM generally better)')
     
-    # Training arguments
+    # Training optimization arguments
     parser.add_argument('--data-type', type=str, default='sequential',
                        choices=['sequential', 'session'],
-                       help='Type of data processing')
+                       help='Data processing type (sequential vs session-based)')
     parser.add_argument('--epochs', type=int, default=50,
-                       help='Number of training epochs')
+                       help='Maximum number of training epochs')
     parser.add_argument('--batch-size', type=int, default=256,
-                       help='Batch size')
+                       help='Training batch size (larger = more stable gradients)')
     parser.add_argument('--learning-rate', type=float, default=0.001,
-                       help='Learning rate')
+                       help='Adam optimizer learning rate')
     parser.add_argument('--weight-decay', type=float, default=1e-5,
-                       help='Weight decay')
+                       help='L2 regularization weight decay')
     parser.add_argument('--patience', type=int, default=10,
-                       help='Early stopping patience')
+                       help='Early stopping patience (epochs without improvement)')
     
     # System arguments
     parser.add_argument('--device', type=str, default='auto',
@@ -92,13 +112,13 @@ def parse_args():
     parser.add_argument('--save-dir', type=str, default='./models',
                        help='Directory to save models')
     
-    # Experiment tracking
+    # Experiment tracking and logging
     parser.add_argument('--use-wandb', action='store_true',
-                       help='Use Weights & Biases')
+                       help='Enable Weights & Biases experiment tracking')
     parser.add_argument('--wandb-project', type=str, default='sequential-rec',
-                       help='Wandb project name')
+                       help='WandB project name for organizing experiments')
     parser.add_argument('--experiment-name', type=str, default=None,
-                       help='Experiment name')
+                       help='Custom experiment name (auto-generated if None)')
     
     # Evaluation
     parser.add_argument('--evaluate-ranking', action='store_true',
@@ -110,8 +130,23 @@ def parse_args():
 
 
 def create_model(model_type: str, config: dict, args) -> torch.nn.Module:
-    """Create sequential model based on type"""
+    """Create sequential recommendation model based on specified architecture type
+    
+    Factory function that instantiates the appropriate model class with
+    hyperparameters from command-line arguments. Each model type has different
+    architectural characteristics suited for different recommendation scenarios.
+    
+    Args:
+        model_type: Architecture type ('sequential', 'attention', 'hierarchical', 'session')
+        config: Model configuration dict with vocab sizes
+        args: Parsed command-line arguments with hyperparameters
+    
+    Returns:
+        Initialized PyTorch model ready for training
+    """
     if model_type == 'sequential':
+        # Standard RNN-based sequential model (LSTM/GRU)
+        # Good baseline for sequential recommendation with temporal patterns
         model = SequentialRecommender(
             num_items=config['num_items'],
             embedding_dim=args.embedding_dim,
@@ -121,6 +156,8 @@ def create_model(model_type: str, config: dict, args) -> torch.nn.Module:
             rnn_type=args.rnn_type
         )
     elif model_type == 'attention':
+        # Self-attention based model (SASRec-style)
+        # Better at capturing long-range dependencies in sequences
         model = AttentionalSequentialRecommender(
             num_items=config['num_items'],
             embedding_dim=args.embedding_dim,
@@ -130,22 +167,26 @@ def create_model(model_type: str, config: dict, args) -> torch.nn.Module:
             max_seq_len=args.max_seq_length
         )
     elif model_type == 'hierarchical':
+        # Hierarchical model with separate short-term and long-term modeling
+        # Captures both recent preferences and overall user taste
         model = HierarchicalSequentialRecommender(
             num_items=config['num_items'],
             embedding_dim=args.embedding_dim,
-            short_hidden_dim=args.hidden_dim // 2,
-            long_hidden_dim=args.hidden_dim,
+            short_hidden_dim=args.hidden_dim // 2,  # Smaller for recent items
+            long_hidden_dim=args.hidden_dim,        # Larger for long-term patterns
             num_layers=args.num_layers,
             dropout=args.dropout
         )
     elif model_type == 'session':
+        # Session-based model optimized for short interaction sessions
+        # Uses GRU and attention for session-level recommendation
         model = SessionBasedRecommender(
             num_items=config['num_items'],
             embedding_dim=args.embedding_dim,
             hidden_dim=args.hidden_dim,
             num_layers=args.num_layers,
             dropout=args.dropout,
-            use_attention=True
+            use_attention=True  # Attention helps identify important session items
         )
     else:
         raise ValueError(f"Unknown model type: {model_type}")
@@ -175,20 +216,20 @@ def main():
         )
     
     try:
-        # Load data
-        logger.info("Loading and preprocessing data...")
+        # Load and preprocess data with temporal ordering
+        logger.info("Loading and preprocessing data for sequential modeling...")
         data_loader = SequentialDataLoader(
             ratings_path=args.ratings_path,
-            min_interactions=args.min_interactions,
-            min_seq_length=args.min_seq_length,
-            max_seq_length=args.max_seq_length
+            min_interactions=args.min_interactions,  # Filter sparse users
+            min_seq_length=args.min_seq_length,      # Minimum meaningful sequence
+            max_seq_length=args.max_seq_length       # Truncation point for efficiency
         )
         
-        # Create data loaders
+        # Create PyTorch data loaders with proper sequence handling
         train_loader, val_loader, test_loader = data_loader.create_data_loaders(
-            data_type=args.data_type,
-            batch_size=args.batch_size,
-            num_workers=args.num_workers
+            data_type=args.data_type,    # Sequential vs session-based processing
+            batch_size=args.batch_size,  # Larger batches for stable training
+            num_workers=args.num_workers # Parallel data loading
         )
         
         # Get model config
@@ -207,14 +248,14 @@ def main():
             weight_decay=args.weight_decay
         )
         
-        # Train model
-        logger.info("Starting training...")
+        # Train model with early stopping and checkpointing
+        logger.info("Starting sequential model training...")
         history = trainer.train(
             train_loader=train_loader,
             val_loader=val_loader,
             epochs=args.epochs,
-            patience=args.patience,
-            save_dir=args.save_dir
+            patience=args.patience,  # Early stopping to prevent overfitting
+            save_dir=args.save_dir   # Save best model and training history
         )
         
         logger.info(f"Training completed. Best validation loss: {trainer.best_val_loss:.4f}")
@@ -227,20 +268,20 @@ def main():
         for metric, value in test_metrics.items():
             logger.info(f"  {metric}: {value:.4f}")
         
-        # Additional evaluation if requested
+        # Comprehensive evaluation with advanced metrics if requested
         if args.evaluate_ranking:
-            logger.info("Evaluating additional ranking metrics...")
+            logger.info("Evaluating advanced ranking and sequence prediction metrics...")
             evaluator = SequentialEvaluator(model, device)
             
-            # Next-item prediction metrics
+            # Next-item prediction with ranking-aware metrics
             ranking_metrics = evaluator.evaluate_next_item_prediction(test_loader, args.top_k)
-            logger.info("Ranking Results:")
+            logger.info("Ranking Results (NDCG, MRR, Hit Rates):")
             for metric, value in ranking_metrics.items():
                 logger.info(f"  {metric}: {value:.4f}")
             
-            # Sequence prediction metrics
+            # Multi-step sequence prediction capability
             seq_metrics = evaluator.evaluate_sequence_prediction(test_loader, future_steps=5)
-            logger.info("Sequence Prediction Results:")
+            logger.info("Multi-step Sequence Prediction Results:")
             for metric, value in seq_metrics.items():
                 logger.info(f"  {metric}: {value:.4f}")
             
@@ -249,15 +290,16 @@ def main():
         else:
             all_metrics = test_metrics
         
-        # Log to wandb
+        # Log comprehensive results to Weights & Biases
         if args.use_wandb:
-            wandb.log(all_metrics)
-            wandb.log({"training_history": history})
+            wandb.log(all_metrics)                    # Final test metrics
+            wandb.log({"training_history": history})  # Training curves and progress
         
-        # Save encoders and metrics
+        # Save all artifacts for reproducibility and deployment
         save_path = Path(args.save_dir)
-        data_loader.save_encoders(save_path / 'encoders.pkl')
+        data_loader.save_encoders(save_path / 'encoders.pkl')  # ID mappings for inference
         
+        # Save final metrics for comparison and reporting
         import json
         with open(save_path / 'final_metrics.json', 'w') as f:
             json.dump(all_metrics, f, indent=2)

@@ -418,17 +418,20 @@ class SessionBasedRecommender(nn.Module):
                 gru_output, batch_first=True
             )
         
-        # Session representation
+        # Session representation: create unified session embedding from GRU sequence outputs
         if self.use_attention:
-            # Attention-based session representation
+            # Attention-based session representation: learns which items are most important
+            # Computes attention weights for each timestep and creates weighted sum
             attention_weights = F.softmax(self.attention_linear(gru_output), dim=1)
-            session_repr = (gru_output * attention_weights).sum(dim=1)
+            session_repr = (gru_output * attention_weights).sum(dim=1)  # Weighted average of all timesteps
         else:
-            # Use last hidden state
+            # Use last hidden state as session representation (simpler approach)
             batch_size = gru_output.size(0)
             if lengths is not None:
+                # Get last valid timestep for each sequence (handles variable lengths)
                 session_repr = gru_output[range(batch_size), lengths - 1]
             else:
+                # Use last timestep for fixed-length sequences
                 session_repr = gru_output[:, -1]
         
         # Final predictions
