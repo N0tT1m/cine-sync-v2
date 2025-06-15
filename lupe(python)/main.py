@@ -31,6 +31,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import load_config
 from models import HybridRecommenderModel, load_model, LupeContentManager
+from unified_content_manager import UnifiedLupeContentManager
 
 # Load configuration early
 config = load_config()
@@ -691,8 +692,8 @@ class LupeRecommendationBot(commands.Bot):
         try:
             logger.info("Loading Lupe Content Manager...")
             
-            # Initialize Lupe Content Manager
-            self.lupe = LupeContentManager(config.model.models_dir, str(self.device))
+            # Initialize Unified Lupe Content Manager
+            self.lupe = UnifiedLupeContentManager(config.model.models_dir, str(self.device))
             self.lupe.load_models()
             
             # Set up legacy compatibility attributes
@@ -1118,9 +1119,9 @@ async def recommend_content(
             logger.info(f"Using Lupe AI recommendations for {content_type}")
             recommendations = bot.lupe.get_recommendations(
                 user_id=user_id,
+                limit=limit,
                 content_type=content_type,
-                top_k=limit,
-                genre_filter=genre
+                genre=genre
             )
             method = f"Lupe AI ({content_type.title()})"
             
@@ -1137,9 +1138,9 @@ async def recommend_content(
                 # Fallback to general recommendations
                 recommendations = bot.lupe.get_recommendations(
                     user_id=0,  # Use fallback user
+                    limit=limit,
                     content_type=content_type,
-                    top_k=limit,
-                    genre_filter=genre
+                    genre=genre
                 )
                 method = f"General {content_type.title()}"
                 
@@ -1148,9 +1149,9 @@ async def recommend_content(
             logger.info(f"Using general {content_type} recommendations")
             recommendations = bot.lupe.get_recommendations(
                 user_id=0,  # Use fallback user
+                limit=limit,
                 content_type=content_type,
-                top_k=limit,
-                genre_filter=genre
+                genre=genre
             )
             method = f"Popular {content_type.title()}"
         
@@ -1187,9 +1188,17 @@ async def recommend_content(
                 
                 genres = content_info.get('genres', 'Unknown')
                 
+                # Format confidence score with color indicator
+                if score <= 1.0:
+                    confidence = f"{score:.1%}"
+                    conf_color = "🟢" if score > 0.7 else "🟡" if score > 0.4 else "🔴"
+                else:
+                    confidence = f"{score:.2f}"
+                    conf_color = "🟢" if score > 3.5 else "🟡" if score > 2.5 else "🔴"
+                
                 embed.add_field(
                     name=f"{i}. {type_emoji} {title_text}",
-                    value=f"**Type:** {type_text}\n**Genres:** {genres}\n**Score:** {score:.2f}",
+                    value=f"**Type:** {type_text}\n**Genres:** {genres}\n{conf_color} **Confidence:** {confidence}",
                     inline=False
                 )
 
@@ -1301,10 +1310,8 @@ async def cross_recommend(
         
         # Get cross-content recommendations
         recommendations = bot.lupe.get_cross_content_recommendations(
-            user_id=user_id,
-            source_type=source_type,
-            target_type=target_type,
-            top_k=limit
+            user_id=user_id if user_id else interaction.user.id,
+            limit=limit
         )
         
         if recommendations:
@@ -1496,6 +1503,325 @@ async def lupe_status(interaction: discord.Interaction):
     except Exception as e:
         logger.error(f"Error in lupe_status: {e}")
         await interaction.response.send_message("Error retrieving Lupe status.")
+
+
+@bot.tree.command(name="model_compare", description="Compare recommendations from different AI models")
+@app_commands.describe(
+    user_id="User ID for personalized comparison (optional)",
+    limit="Number of recommendations per model (1-10)"
+)
+async def model_compare(interaction: discord.Interaction, user_id: Optional[int] = None, limit: Optional[int] = 5):
+    """Compare recommendations from different models"""
+    await interaction.response.defer()
+    
+    try:
+        if not bot.lupe:
+            embed = discord.Embed(
+                title="❌ Bot Not Ready",
+                description="The bot is still loading. Please wait and try again.",
+                color=0xff0000
+            )
+            await interaction.followup.send(embed=embed)
+            return
+        
+        # Use Discord user ID if no user_id provided
+        if user_id is None:
+            user_id = interaction.user.id
+        
+        limit = max(1, min(limit or 5, 10))
+        
+        # Get model comparison
+        comparison = bot.lupe.compare_models(user_id=user_id, limit=limit)
+        
+        if not comparison:
+            embed = discord.Embed(
+                title="❌ No Models Available",
+                description="No AI models are currently loaded for comparison.",
+                color=0xff0000
+            )
+            await interaction.followup.send(embed=embed)
+            return
+        
+        # Create embed for comparison
+        embed = discord.Embed(
+            title="🤖 Model Comparison",
+            description=f"Recommendations for User {user_id}",
+            color=0x9932cc
+        )
+        
+        for model_name, recommendations in comparison.items():
+            if recommendations:
+                rec_text = []
+                for i, (content_id, title, content_type, score) in enumerate(recommendations[:3], 1):
+                    icon = "🎬" if content_type == "movie" else "📺"
+                    rec_text.append(f"{i}. {icon} {title} ({score:.2f})")
+                
+                embed.add_field(
+                    name=f"{model_name.upper()} Model",
+                    value="\n".join(rec_text) if rec_text else "No recommendations",
+                    inline=False
+                )
+        
+        await interaction.followup.send(embed=embed)
+        
+    except Exception as e:
+        logger.error(f"Error in model_compare: {e}")
+        await interaction.followup.send("Error comparing models.")
+
+
+@bot.tree.command(name="model_health", description="Check health status of all AI models")
+async def model_health(interaction: discord.Interaction):
+    """Check health status of all models"""
+    await interaction.response.defer()
+    
+    try:
+        if not bot.lupe:
+            embed = discord.Embed(
+                title="❌ Bot Not Ready",
+                description="The bot is still loading. Please wait and try again.",
+                color=0xff0000
+            )
+            await interaction.followup.send(embed=embed)
+            return
+        
+        # Get model health
+        health = bot.lupe.get_model_health()
+        model_info = bot.lupe.get_model_info()
+        
+        embed = discord.Embed(
+            title="🏥 Model Health Check",
+            description="Status of all AI models",
+            color=0x00ff00 if all(health.values()) else 0xff9900
+        )
+        
+        # Add health status for each model
+        for model_name, is_healthy in health.items():
+            status_icon = "✅" if is_healthy else "❌"
+            status_text = "Healthy" if is_healthy else "Unhealthy"
+            embed.add_field(
+                name=f"{model_name.upper()} Model",
+                value=f"{status_icon} {status_text}",
+                inline=True
+            )
+        
+        # Add system info
+        if 'device' in model_info:
+            embed.add_field(name="Device", value=model_info['device'], inline=True)
+        
+        if 'loaded_models' in model_info:
+            loaded_count = len(model_info['loaded_models'])
+            embed.add_field(name="Models Loaded", value=f"{loaded_count}", inline=True)
+        
+        # Add legacy data info
+        if 'legacy_data' in model_info:
+            legacy = model_info['legacy_data']
+            embed.add_field(
+                name="Data Status",
+                value=f"Movies: {legacy.get('movie_count', 0):,}\nTV Shows: {legacy.get('tv_count', 0):,}",
+                inline=True
+            )
+        
+        await interaction.followup.send(embed=embed)
+        
+    except Exception as e:
+        logger.error(f"Error in model_health: {e}")
+        await interaction.followup.send("Error checking model health.")
+
+
+@bot.tree.command(name="next_episode", description="Predict what to watch next based on your viewing history")
+@app_commands.describe(
+    recent_watches="Recent content you've watched (comma-separated titles or IDs)",
+    limit="Number of predictions (1-10)"
+)
+async def next_episode(interaction: discord.Interaction, recent_watches: str, limit: Optional[int] = 5):
+    """Predict next items based on sequence using sequential model"""
+    await interaction.response.defer()
+    
+    try:
+        if not bot.lupe:
+            embed = discord.Embed(
+                title="❌ Bot Not Ready",
+                description="The bot is still loading. Please wait and try again.",
+                color=0xff0000
+            )
+            await interaction.followup.send(embed=embed)
+            return
+        
+        limit = max(1, min(limit or 5, 10))
+        
+        # Parse recent watches - try to convert to IDs
+        sequence = []
+        watch_items = [item.strip() for item in recent_watches.split(',')]
+        
+        for item in watch_items:
+            # Try to parse as ID first
+            try:
+                content_id = int(item)
+                sequence.append(content_id)
+            except ValueError:
+                # Search for title in lookups
+                found_id = None
+                item_lower = item.lower()
+                
+                # Search movies
+                for content_id, content_info in bot.lupe.movie_lookup.items():
+                    title = content_info.get('title', '').lower()
+                    if item_lower in title or title in item_lower:
+                        found_id = content_id
+                        break
+                
+                # Search TV shows if not found in movies
+                if not found_id:
+                    for content_id, content_info in bot.lupe.tv_lookup.items():
+                        title = content_info.get('title', '').lower()
+                        if item_lower in title or title in item_lower:
+                            found_id = content_id
+                            break
+                
+                if found_id:
+                    sequence.append(found_id)
+        
+        if not sequence:
+            embed = discord.Embed(
+                title="❌ No Valid Items Found",
+                description="Could not find any of the items you mentioned. Try using specific titles or IDs.",
+                color=0xff0000
+            )
+            await interaction.followup.send(embed=embed)
+            return
+        
+        # Get next item predictions
+        predictions = bot.lupe.predict_next_items(sequence=sequence, limit=limit)
+        
+        if not predictions:
+            embed = discord.Embed(
+                title="🤖 No Predictions Available",
+                description="The sequential model couldn't generate predictions. This feature requires specific model training.",
+                color=0xff9900
+            )
+            await interaction.followup.send(embed=embed)
+            return
+        
+        # Create embed
+        embed = discord.Embed(
+            title="🔮 Next Episode Predictions",
+            description=f"Based on your sequence: {', '.join([str(x) for x in sequence[:3]])}{'...' if len(sequence) > 3 else ''}",
+            color=0x9932cc
+        )
+        
+        rec_text = []
+        for i, (content_id, title, content_type, score) in enumerate(predictions, 1):
+            icon = "🎬" if content_type == "movie" else "📺"
+            confidence = f"{score:.1%}" if score <= 1.0 else f"{score:.2f}"
+            rec_text.append(f"{i}. {icon} **{title}** ({confidence})")
+        
+        embed.add_field(
+            name="Predicted Next Items",
+            value="\n".join(rec_text),
+            inline=False
+        )
+        
+        embed.set_footer(text="💡 This uses AI to predict what you might enjoy next based on viewing patterns")
+        
+        await interaction.followup.send(embed=embed)
+        
+    except Exception as e:
+        logger.error(f"Error in next_episode: {e}")
+        await interaction.followup.send("Error predicting next episode.")
+
+
+@bot.tree.command(name="recommend_advanced", description="Advanced recommendations with model and confidence options")
+@app_commands.describe(
+    content_type="Type of content to recommend",
+    model="Specific AI model to use",
+    user_id="User ID for personalized recommendations", 
+    genre="Genre filter",
+    limit="Number of recommendations"
+)
+async def recommend_advanced(
+    interaction: discord.Interaction,
+    content_type: Optional[str] = "mixed",
+    model: Optional[str] = "ensemble",
+    user_id: Optional[int] = None,
+    genre: Optional[str] = None,
+    limit: Optional[int] = 5
+):
+    """Advanced recommendations with model selection and confidence scores"""
+    await interaction.response.defer()
+    
+    try:
+        if not bot.lupe:
+            embed = discord.Embed(
+                title="❌ Bot Not Ready", 
+                description="The bot is still loading. Please wait and try again.",
+                color=0xff0000
+            )
+            await interaction.followup.send(embed=embed)
+            return
+        
+        # Use Discord user ID if none provided
+        if user_id is None:
+            user_id = interaction.user.id
+        
+        # Validate inputs
+        content_type = (content_type or "mixed").lower()
+        model = (model or "ensemble").lower()
+        limit = max(1, min(limit or 5, 15))
+        
+        # Get recommendations with specified model
+        recommendations = bot.lupe.get_recommendations(
+            user_id=user_id,
+            limit=limit,
+            content_type=content_type,
+            genre=genre,
+            model_type=model
+        )
+        
+        if not recommendations:
+            embed = discord.Embed(
+                title="❌ No Recommendations Found",
+                description="No recommendations could be generated with the current filters.",
+                color=0xff0000
+            )
+            await interaction.followup.send(embed=embed)
+            return
+        
+        # Create embed
+        embed = discord.Embed(
+            title="🎯 Advanced Recommendations",
+            description=f"Model: **{model.upper()}** | Content: **{content_type.title()}**{f' | Genre: **{genre}**' if genre else ''}",
+            color=0x9932cc
+        )
+        
+        rec_text = []
+        for i, (content_id, title, content_type_rec, score) in enumerate(recommendations, 1):
+            icon = "🎬" if content_type_rec == "movie" else "📺"
+            
+            # Format confidence score
+            if score <= 1.0:
+                confidence = f"{score:.1%}"
+                conf_color = "🟢" if score > 0.7 else "🟡" if score > 0.4 else "🔴"
+            else:
+                confidence = f"{score:.2f}"
+                conf_color = "🟢" if score > 3.5 else "🟡" if score > 2.5 else "🔴"
+            
+            rec_text.append(f"{i}. {icon} **{title}**\n   {conf_color} Confidence: {confidence}")
+        
+        embed.add_field(
+            name="Recommendations",
+            value="\n".join(rec_text),
+            inline=False
+        )
+        
+        embed.set_footer(text=f"🤖 Generated using {model.upper()} model | User {user_id}")
+        
+        # Add feedback view
+        view = FeedbackView(recommendations, f"advanced_{model}", f"{content_type}_{genre}")
+        await interaction.followup.send(embed=embed, view=view)
+        
+    except Exception as e:
+        logger.error(f"Error in recommend_advanced: {e}")
+        await interaction.followup.send("Error generating advanced recommendations.")
 
 
 async def get_collaborative_recommendations(user_id: int, limit: int, genre_filter: str = None) -> List[tuple]:
@@ -2780,6 +3106,36 @@ async def genre_autocomplete(interaction: discord.Interaction, current: str) -> 
         # Return basic genres as fallback
         basic_genres = ['Action', 'Comedy', 'Drama', 'Horror', 'Romance', 'Sci-Fi', 'Thriller']
         return [app_commands.Choice(name=genre, value=genre) for genre in basic_genres]
+
+
+# Autocomplete functions for new commands
+@recommend_advanced.autocomplete('content_type')
+async def recommend_advanced_content_type_autocomplete(interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
+    """Autocomplete for recommend_advanced content_type"""
+    content_types = ['mixed', 'movie', 'tv']
+    matching = [ct for ct in content_types if current.lower() in ct.lower()]
+    return [app_commands.Choice(name=ct.title(), value=ct) for ct in matching]
+
+
+@recommend_advanced.autocomplete('model')
+async def recommend_advanced_model_autocomplete(interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
+    """Autocomplete for recommend_advanced model"""
+    models = ['ensemble', 'ncf', 'sequential', 'two_tower']
+    model_names = {
+        'ensemble': 'Ensemble (All Models)',
+        'ncf': 'Neural Collaborative Filtering',
+        'sequential': 'Sequential/Time-aware',
+        'two_tower': 'Two-Tower/Dual-Encoder'
+    }
+    
+    matching = [m for m in models if current.lower() in m.lower()]
+    return [app_commands.Choice(name=model_names[m], value=m) for m in matching]
+
+
+@recommend_advanced.autocomplete('genre')
+async def recommend_advanced_genre_autocomplete(interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
+    """Autocomplete for recommend_advanced genre"""
+    return await genre_autocomplete(interaction, current)
 
 
 # Run the bot
