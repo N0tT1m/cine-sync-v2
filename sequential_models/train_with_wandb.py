@@ -208,7 +208,23 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Train Sequential Model with Wandb')
     
     # Data arguments
-    parser.add_argument('--ratings-path', type=str, default='../movies/cinesync/ml-32m/ratings.csv',
+    # Try multiple possible paths for the data files
+    possible_ratings_paths = [
+        str(Path(__file__).parent.parent / 'movies' / 'cinesync' / 'ml-32m' / 'ratings.csv'),
+        '../movies/cinesync/ml-32m/ratings.csv',
+        '../../movies/cinesync/ml-32m/ratings.csv',
+        'movies/cinesync/ml-32m/ratings.csv',
+        '/Users/timmy/workspace/ai-apps/cine-sync-v2/movies/cinesync/ml-32m/ratings.csv'
+    ]
+    
+    # Find first existing path
+    default_ratings_path = None
+    for path in possible_ratings_paths:
+        if os.path.exists(path):
+            default_ratings_path = path
+            break
+    
+    parser.add_argument('--ratings-path', type=str, default=default_ratings_path,
                        help='Path to ratings CSV file')
     parser.add_argument('--min-interactions', type=int, default=20,
                        help='Minimum interactions per user')
