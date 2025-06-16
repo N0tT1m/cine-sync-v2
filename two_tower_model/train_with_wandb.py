@@ -589,8 +589,8 @@ def train_two_tower_with_wandb(args):
                 with open("models/two_tower_metadata.pkl", 'wb') as f:
                     pickle.dump(metadata, f)
                 
-                # Save as wandb artifact
-                wandb_manager.save_model_artifact(
+                # Save model locally instead of WandB artifact
+                wandb_manager.save_model_locally(
                     best_model_path,
                     'two_tower',
                     metadata={

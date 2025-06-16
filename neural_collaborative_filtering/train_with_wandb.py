@@ -274,33 +274,44 @@ def prepare_data(ratings_path, min_ratings_user=20, min_ratings_item=20,
         test_df['rating_norm'].values
     )
     
-    # Create optimized data loaders for Ryzen 3900X (12C/24T)
-    train_loader = DataLoader(
+    # Import training optimizations
+    from training_optimizations import TrainingOptimizer, create_ncf_sample_input
+    
+    # Initialize training optimizer
+    training_optimizer = TrainingOptimizer(device)
+    
+    # Find optimal batch size for this model
+    model_temp = NCFModel(
+        num_users=num_users,
+        num_items=num_items,
+        embedding_dim=args.embedding_dim,
+        hidden_layers=args.hidden_layers,
+        dropout=args.dropout,
+        alpha=args.alpha
+    ).to(device)
+    
+    optimal_batch_size = training_optimizer.find_optimal_batch_size(
+        model_temp,
+        lambda bs: create_ncf_sample_input(bs, device),
+        initial_batch_size=256
+    )
+    del model_temp  # Clean up temporary model
+    
+    # Create optimized data loaders
+    train_loader = training_optimizer.create_optimized_dataloader(
         train_dataset, 
-        batch_size=512,
-        shuffle=True, 
-        num_workers=12,
-        pin_memory=True,
-        persistent_workers=True,
-        prefetch_factor=2
+        batch_size=optimal_batch_size,
+        shuffle=True
     )
-    val_loader = DataLoader(
+    val_loader = training_optimizer.create_optimized_dataloader(
         val_dataset, 
-        batch_size=1024,
-        shuffle=False, 
-        num_workers=8,
-        pin_memory=True,
-        persistent_workers=True,
-        prefetch_factor=2
+        batch_size=optimal_batch_size * 2,  # Larger batch for validation
+        shuffle=False
     )
-    test_loader = DataLoader(
+    test_loader = training_optimizer.create_optimized_dataloader(
         test_dataset, 
-        batch_size=1024,
-        shuffle=False, 
-        num_workers=8,
-        pin_memory=True,
-        persistent_workers=True,
-        prefetch_factor=2
+        batch_size=optimal_batch_size * 2,
+        shuffle=False
     )
     
     # Metadata
@@ -389,15 +400,43 @@ def train_ncf_with_wandb(args):
         logger.info(f"Using device: {device}")
         model = model.to(device)
         
+        # Compile model for performance optimization (20-30% speedup)
+        model = training_optimizer.compile_model(model)
+        
         # Setup training components
         criterion = nn.MSELoss()
-        optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
-        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode='min', factor=0.5, patience=5
+        optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=1e-5)
+        
+        # Improved learning rate scheduling with cosine annealing
+        from training_optimizations import CosineAnnealingWarmup
+        scheduler = CosineAnnealingWarmup(
+            optimizer, 
+            warmup_epochs=5, 
+            max_epochs=args.epochs,
+            eta_min=args.learning_rate * 0.01
         )
         
         # Training logger
         training_logger = WandbTrainingLogger(wandb_manager, 'ncf')
+        
+        # Setup optimized training loop with mixed precision and gradient accumulation
+        from training_optimizations import OptimizedTrainingLoop
+        
+        # Calculate gradient accumulation steps for effective batch size
+        effective_batch_size = 2048  # Target effective batch size
+        accumulation_steps = training_optimizer.setup_gradient_accumulation(
+            effective_batch_size, optimal_batch_size
+        )
+        
+        # Create optimized training loop
+        optimized_trainer = OptimizedTrainingLoop(
+            model=model,
+            optimizer=optimizer,
+            criterion=criterion,
+            device=device,
+            accumulation_steps=accumulation_steps,
+            mixed_precision=device.type == 'cuda'
+        )
         
         # Training loop
         best_val_loss = float('inf')
@@ -408,76 +447,40 @@ def train_ncf_with_wandb(args):
             current_lr = optimizer.param_groups[0]['lr']
             training_logger.log_epoch_start(epoch, args.epochs, current_lr)
             
-            # Training phase
-            model.train()
-            train_losses = []
-            train_rmses = []
+            # Optimized training epoch
+            train_metrics = optimized_trainer.train_epoch(
+                train_loader, epoch, log_frequency=500  # Reduced logging frequency
+            )
             
-            for batch_idx, (user_ids, item_ids, ratings) in enumerate(train_loader):
-                user_ids = user_ids.to(device)
-                item_ids = item_ids.to(device)
-                ratings = ratings.to(device)
-                
-                optimizer.zero_grad()
-                
-                predictions = model(user_ids, item_ids)
-                loss = criterion(predictions, ratings)
-                loss.backward()
-                
-                # Gradient clipping
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-                
-                optimizer.step()
-                
-                # Calculate metrics
-                batch_loss = loss.item()
-                batch_rmse = torch.sqrt(loss).item()
-                
-                train_losses.append(batch_loss)
-                train_rmses.append(batch_rmse)
-                
-                # Log batch metrics
-                if batch_idx % 100 == 0:
-                    additional_metrics = {
-                        'rmse': batch_rmse,
-                        'gradient_norm': torch.nn.utils.clip_grad_norm_(model.parameters(), float('inf')).item()
-                    }
-                    
-                    training_logger.log_batch(
-                        epoch, batch_idx, len(train_loader),
-                        batch_loss, len(user_ids), additional_metrics
-                    )
+            train_loss = train_metrics['avg_loss']
+            train_rmse = math.sqrt(train_loss)
             
-            # Validation phase
-            model.eval()
-            val_losses = []
-            val_rmses = []
+            # Log training metrics
+            training_logger.log_epoch_end(
+                epoch, train_loss, train_rmse, 
+                {
+                    'epoch_time': train_metrics['epoch_time'],
+                    'batches_per_sec': train_metrics['batches_per_sec']
+                }
+            )
             
-            with torch.no_grad():
-                for user_ids, item_ids, ratings in val_loader:
-                    user_ids = user_ids.to(device)
-                    item_ids = item_ids.to(device)
-                    ratings = ratings.to(device)
-                    
-                    predictions = model(user_ids, item_ids)
-                    loss = criterion(predictions, ratings)
-                    
-                    val_losses.append(loss.item())
-                    val_rmses.append(torch.sqrt(loss).item())
+            # Optimized validation epoch
+            val_metrics = optimized_trainer.validate_epoch(val_loader)
+            val_loss = val_metrics['avg_loss']
+            val_rmse = math.sqrt(val_loss)
             
-            # Calculate epoch metrics
-            train_loss = np.mean(train_losses)
-            val_loss = np.mean(val_losses)
-            train_rmse = np.mean(train_rmses)
-            val_rmse = np.mean(val_rmses)
+            # Log validation metrics
+            validation_metrics = {
+                'rmse': val_rmse,
+                'validation_time': val_metrics['validation_time']
+            }
+            training_logger.log_validation(epoch, val_loss, validation_metrics)
             
-            # Log epoch summary
-            train_metrics = {'rmse': train_rmse}
-            val_metrics = {'rmse': val_rmse}
-            training_logger.log_epoch_end(epoch, train_loss, val_loss, train_metrics, val_metrics)
+            # Learning rate scheduling (cosine annealing)
+            scheduler.step()
             
-            # Learning rate scheduling
-            scheduler.step(val_loss)
+            # Memory cleanup
+            training_optimizer.memory_cleanup(epoch)
             
             # Early stopping and model saving
             if val_loss < best_val_loss:
@@ -502,8 +505,8 @@ def train_ncf_with_wandb(args):
                 with open("models/ncf_metadata.pkl", 'wb') as f:
                     pickle.dump(metadata, f)
                 
-                # Save as wandb artifact
-                wandb_manager.save_model_artifact(
+                # Save model locally instead of WandB artifact
+                wandb_manager.save_model_locally(
                     best_model_path,
                     'ncf',
                     metadata={
@@ -553,6 +556,39 @@ def train_ncf_with_wandb(args):
         }
         
         wandb_manager.log_metrics({f'final/{k}': v for k, v in final_metrics.items()})
+        
+        # Run Weave evaluation if test data is available
+        try:
+            from wandb_weave_evaluation import WeaveEvaluationManager, NCFModelWrapper
+            import asyncio
+            
+            # Create test examples for evaluation
+            test_examples = []
+            for user_ids, item_ids, ratings in test_loader:
+                for u, i, r in zip(user_ids, item_ids, ratings):
+                    test_examples.append({
+                        'user_id': u.item(),
+                        'item_id': i.item(),
+                        'expected_rating': r.item()
+                    })
+                    if len(test_examples) >= 500:  # Limit evaluation size
+                        break
+                if len(test_examples) >= 500:
+                    break
+            
+            if test_examples:
+                logger.info("Running Weave evaluation...")
+                evaluator = WeaveEvaluationManager()
+                model_wrapper = NCFModelWrapper(best_model_path, 'ncf')
+                
+                # Run evaluation asynchronously
+                eval_results = asyncio.run(evaluator.evaluate_rating_model(
+                    model_wrapper, test_examples, 'ncf'
+                ))
+                logger.info(f"Weave evaluation completed: {eval_results}")
+                
+        except Exception as e:
+            logger.warning(f"Weave evaluation failed: {e}")
         
         logger.info(f"Training completed! Test RMSE: {test_rmse:.4f}")
         
