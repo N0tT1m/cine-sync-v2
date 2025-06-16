@@ -557,10 +557,10 @@ def train_hybrid_with_wandb(args):
                 with open("models/hybrid_metadata.pkl", 'wb') as f:
                     pickle.dump(metadata, f)
                 
-                # Save as wandb artifact
-                wandb_manager.save_model_artifact(
+                # Save model locally instead of WandB artifact
+                wandb_manager.save_model_locally(
                     best_model_path,
-                    'hybrid',
+                    'hybrid_movie',
                     metadata={
                         'epoch': epoch,
                         'val_loss': val_loss,

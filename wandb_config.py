@@ -208,38 +208,52 @@ class WandbManager:
         except Exception as e:
             self.logger.error(f"Failed to log hyperparameters: {e}")
     
-    def save_model_artifact(self, model_path: str, model_name: str, metadata: Optional[Dict] = None):
-        """Save model as wandb artifact"""
-        if not self.is_initialized:
-            return None
-            
+    def save_model_locally(self, model_path: str, model_name: str, metadata: Optional[Dict] = None):
+        """Save model locally to models/ folder instead of WandB artifacts"""
         try:
-            # Create artifact
-            artifact = wandb.Artifact(
-                name=f"{model_name}-model",
-                type="model",
-                description=f"CineSync {model_name} model checkpoint",
-                metadata=metadata or {}
-            )
+            # Create models directory if it doesn't exist
+            models_dir = Path("models")
+            models_dir.mkdir(exist_ok=True)
             
-            # Add model file
-            artifact.add_file(model_path)
+            # Create subdirectory for this model type
+            model_type_dir = models_dir / model_name
+            model_type_dir.mkdir(exist_ok=True)
             
-            # Add related files if they exist
-            model_dir = Path(model_path).parent
+            # Generate timestamped filename
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            model_filename = f"{model_name}_{timestamp}.pt"
+            local_model_path = model_type_dir / model_filename
+            
+            # Copy model file to local models directory
+            import shutil
+            shutil.copy2(model_path, local_model_path)
+            
+            # Copy related files if they exist
             for ext in ['.pkl', '.json', '_metadata.pkl', '_encoders.pkl']:
                 related_file = str(model_path).replace('.pt', ext)
                 if Path(related_file).exists():
-                    artifact.add_file(related_file)
+                    local_related_file = str(local_model_path).replace('.pt', ext)
+                    shutil.copy2(related_file, local_related_file)
             
-            # Log artifact
-            self.run.log_artifact(artifact)
-            self.logger.info(f"Saved model artifact: {model_name}")
+            # Save metadata to JSON file
+            if metadata:
+                metadata_file = str(local_model_path).replace('.pt', '_metadata.json')
+                with open(metadata_file, 'w') as f:
+                    json.dump(metadata, f, indent=2, default=str)
             
-            return artifact
+            self.logger.info(f"Saved model locally: {local_model_path}")
+            
+            # Log the local path to WandB for reference (without uploading the file)
+            if self.is_initialized:
+                self.log_metrics({
+                    f'{model_name}/local_model_path': str(local_model_path),
+                    f'{model_name}/model_saved_timestamp': timestamp
+                })
+            
+            return str(local_model_path)
             
         except Exception as e:
-            self.logger.error(f"Failed to save model artifact: {e}")
+            self.logger.error(f"Failed to save model locally: {e}")
             return None
     
     def load_model_artifact(self, artifact_name: str, version: str = "latest") -> Optional[str]:
