@@ -16,6 +16,7 @@ import argparse
 import logging
 import torch
 import wandb
+import pickle
 from pathlib import Path
 import sys
 import os
@@ -292,8 +293,10 @@ def main():
         
         # Log comprehensive results to Weights & Biases
         if args.use_wandb:
-            wandb.log(all_metrics)                    # Final test metrics
-            wandb.log({"training_history": history})  # Training curves and progress
+            # Use explicit steps to avoid conflicts
+            final_step = wandb.run.step if wandb.run and hasattr(wandb.run, 'step') else 0
+            wandb.log(all_metrics, step=final_step)                    # Final test metrics
+            wandb.log({"training_history": history}, step=final_step + 1)  # Training curves and progress
         
         # Save all artifacts for reproducibility and deployment
         save_path = Path(args.save_dir)
@@ -304,7 +307,81 @@ def main():
         with open(save_path / 'final_metrics.json', 'w') as f:
             json.dump(all_metrics, f, indent=2)
         
-        logger.info(f"Training completed successfully. Models saved to {args.save_dir}")
+        # Save additional artifacts for compatibility
+        print("Saving additional model artifacts...")
+        
+        # Get encoders from data loader
+        user_encoder = data_loader.user_encoder
+        item_encoder = data_loader.item_encoder
+        
+        # Save ID mappings in expected format
+        id_mappings = {
+            'user_id_to_idx': {str(k): v for k, v in zip(user_encoder.classes_, range(len(user_encoder.classes_)))},
+            'movie_id_to_idx': {str(k): v for k, v in zip(item_encoder.classes_, range(len(item_encoder.classes_)))},
+            'idx_to_user_id': {v: str(k) for k, v in zip(user_encoder.classes_, range(len(user_encoder.classes_)))},
+            'idx_to_movie_id': {v: str(k) for k, v in zip(item_encoder.classes_, range(len(item_encoder.classes_)))}
+        }
+        
+        with open(save_path / 'id_mappings.pkl', 'wb') as f:
+            pickle.dump(id_mappings, f)
+        print("ID mappings saved to id_mappings.pkl")
+        
+        # Save model metadata
+        model_metadata = {
+            'num_users': len(user_encoder.classes_),
+            'num_items': len(item_encoder.classes_),
+            'embedding_dim': getattr(args, 'embedding_dim', 128),
+            'hidden_size': getattr(args, 'hidden_size', 256),
+            'num_layers': getattr(args, 'num_layers', 2),
+            'max_seq_length': getattr(args, 'max_seq_length', 50),
+            'dropout': getattr(args, 'dropout', 0.2),
+            'final_metrics': all_metrics,
+            'model_architecture': str(model),
+            'model_type': args.model_type
+        }
+        
+        with open(save_path / 'model_metadata.pkl', 'wb') as f:
+            pickle.dump(model_metadata, f)
+        print("Model metadata saved to model_metadata.pkl")
+        
+        # Save training history
+        with open(save_path / 'training_history.pkl', 'wb') as f:
+            pickle.dump(history, f)
+        print("Training history saved to training_history.pkl")
+        
+        # Create movie lookup file
+        movie_lookup = {
+            'movie_id_to_idx': id_mappings['movie_id_to_idx'],
+            'idx_to_movie_id': id_mappings['idx_to_movie_id'],
+            'num_movies': len(item_encoder.classes_)
+        }
+        
+        with open(save_path / 'movie_lookup.pkl', 'wb') as f:
+            pickle.dump(movie_lookup, f)
+        print("Movie lookup saved to movie_lookup.pkl")
+        
+        # Create backup
+        with open(save_path / 'movie_lookup_backup.pkl', 'wb') as f:
+            pickle.dump(movie_lookup, f)
+        print("Movie lookup backup saved to movie_lookup_backup.pkl")
+        
+        # Create rating scaler file
+        rating_scaler = {
+            'min_rating': 1.0,  # Typical MovieLens range
+            'max_rating': 5.0,
+            'mean_rating': 3.5,
+            'std_rating': 1.0
+        }
+        
+        with open(save_path / 'rating_scaler.pkl', 'wb') as f:
+            pickle.dump(rating_scaler, f)
+        print("Rating scaler saved to rating_scaler.pkl")
+        
+        # Save main model file (alternative name)
+        torch.save(model.state_dict(), save_path / 'recommendation_model.pt')
+        print("Model state dict saved to recommendation_model.pt")
+        
+        logger.info(f"All artifacts saved successfully to {args.save_dir}")
         
     except Exception as e:
         logger.error(f"Training failed: {str(e)}")
