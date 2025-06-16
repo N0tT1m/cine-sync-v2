@@ -382,7 +382,8 @@ def train_hybrid_with_wandb(args):
         
         # Log model architecture and enable model watching
         wandb_manager.log_model_architecture(model, 'hybrid')
-        wandb.watch(model, log="all", log_freq=500)  # Watch gradients and parameters
+        # Don't use wandb.watch to avoid step conflicts with manual logging
+        # wandb.watch(model, log="all", log_freq=500)  # Watch gradients and parameters
         
         # Setup device
         if args.device == 'auto':
