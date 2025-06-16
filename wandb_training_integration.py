@@ -46,7 +46,8 @@ class WandbTrainingLogger:
         if lr is not None:
             log_dict['learning_rate'] = lr
             
-        self.wandb_manager.log_metrics(log_dict, commit=False)
+        self.wandb_manager.log_metrics(log_dict, step=self.global_step, commit=False)
+        self.global_step += 1  # Increment after epoch start logging
         logger.info(f"Epoch {epoch}/{total_epochs} started")
     
     def log_batch(self, epoch: int, batch_idx: int, total_batches: int, 
@@ -103,9 +104,14 @@ class WandbTrainingLogger:
                 log_dict[f'val_{key}_epoch'] = value
         
         self.wandb_manager.log_metrics(log_dict, step=self.global_step, commit=True)
+        self.global_step += 1  # Increment after epoch end logging
         
         logger.info(f"Epoch {epoch} completed - Train Loss: {train_loss:.4f}" + 
                    (f", Val Loss: {val_loss:.4f}" if val_loss else ""))
+    
+    def get_current_step(self) -> int:
+        """Get current global step for external logging coordination"""
+        return self.global_step
 
 
 def train_with_wandb(model: nn.Module, train_loader: DataLoader, val_loader: DataLoader,
