@@ -55,9 +55,9 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Train Hybrid Recommender with Wandb')
     
     # Data arguments
-    parser.add_argument('--ratings-path', type=str, default='movies/cinesync/ml-32m/ratings.csv',
+    parser.add_argument('--ratings-path', type=str, default='../../movies/cinesync/ml-32m/ratings.csv',
                        help='Path to ratings CSV file')
-    parser.add_argument('--movies-path', type=str, default='movies/cinesync/ml-32m/movies.csv',
+    parser.add_argument('--movies-path', type=str, default='../../movies/cinesync/ml-32m/movies.csv',
                        help='Path to movies CSV file')
     
     # Model arguments
