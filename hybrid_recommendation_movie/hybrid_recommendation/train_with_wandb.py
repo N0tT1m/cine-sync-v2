@@ -115,14 +115,10 @@ logger = logging.getLogger(__name__)
 
 
 def setup_logging():
-    """Setup logging configuration"""
+    """Minimal logging setup - Wandb handles most logging"""
     logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(f"hybrid_training_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"),
-            logging.StreamHandler(sys.stdout)
-        ]
+        level=logging.WARNING,  # Only show warnings and errors
+        format='%(levelname)s - %(message)s'
     )
 
 
@@ -208,20 +204,30 @@ def parse_args():
     return parser.parse_args()
 
 
+def load_ratings_chunked(filepath, chunk_size=100000):
+    """Load large ratings file in chunks to prevent memory issues"""
+    chunks = []
+    for chunk in pd.read_csv(filepath, chunksize=chunk_size):
+        chunks.append(chunk)
+    return pd.concat(chunks, ignore_index=True)
+
+
 def prepare_data(ratings_path, movies_path, test_size=0.2, val_size=0.1):
     """
-    Prepare data for training with proper ID mappings
+    Prepare data for training with proper ID mappings and chunked loading
     
     Returns:
         train_loader, val_loader, test_loader, metadata
     """
-    logger.info("Loading and preparing data...")
+    # Load data with chunked loading for large files
+    file_size = os.path.getsize(ratings_path) / (1024 * 1024)  # Size in MB
     
-    # Load data
-    ratings_df = pd.read_csv(ratings_path)
+    if file_size > 500:  # Use chunked loading for files > 500MB
+        ratings_df = load_ratings_chunked(ratings_path, chunk_size=50000)
+    else:
+        ratings_df = pd.read_csv(ratings_path)
+        
     movies_df = pd.read_csv(movies_path)
-    
-    logger.info(f"Loaded {len(ratings_df)} ratings and {len(movies_df)} movies")
     
     # Create ID mappings to prevent out-of-bounds errors
     unique_user_ids = sorted(ratings_df['userId'].unique())
@@ -241,23 +247,43 @@ def prepare_data(ratings_path, movies_path, test_size=0.2, val_size=0.1):
     ratings_df['user_idx'] = ratings_df['user_idx'].astype(int)
     ratings_df['movie_idx'] = ratings_df['movie_idx'].astype(int)
     
-    logger.info(f"Mapped to {len(unique_user_ids)} users and {len(unique_movie_ids)} movies")
-    
     # Split data
     train_val_df, test_df = train_test_split(ratings_df, test_size=test_size, random_state=42)
     train_df, val_df = train_test_split(train_val_df, test_size=val_size/(1-test_size), random_state=42)
-    
-    logger.info(f"Split: Train={len(train_df)}, Val={len(val_df)}, Test={len(test_df)}")
     
     # Create datasets
     train_dataset = MovieDataset(train_df)
     val_dataset = MovieDataset(val_df)
     test_dataset = MovieDataset(test_df)
     
-    # Create data loaders
-    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True, num_workers=4)
-    val_loader = DataLoader(val_dataset, batch_size=256, shuffle=False, num_workers=4)
-    test_loader = DataLoader(test_dataset, batch_size=256, shuffle=False, num_workers=4)
+    # Create optimized data loaders for Ryzen 3900X (12C/24T)
+    train_loader = DataLoader(
+        train_dataset, 
+        batch_size=512,  # Larger batch for better GPU utilization
+        shuffle=True, 
+        num_workers=12,  # Use physical cores (3900X has 12 cores)
+        pin_memory=True,  # Faster GPU transfer
+        persistent_workers=True,  # Avoid recreation overhead
+        prefetch_factor=2  # Pipeline optimization
+    )
+    val_loader = DataLoader(
+        val_dataset, 
+        batch_size=1024,  # Larger batch for validation (no gradient computation)
+        shuffle=False, 
+        num_workers=8, 
+        pin_memory=True,
+        persistent_workers=True,
+        prefetch_factor=2
+    )
+    test_loader = DataLoader(
+        test_dataset, 
+        batch_size=1024, 
+        shuffle=False, 
+        num_workers=8,
+        pin_memory=True,
+        persistent_workers=True,
+        prefetch_factor=2
+    )
     
     # Metadata
     metadata = {
@@ -308,12 +334,24 @@ def train_hybrid_with_wandb(args):
         'movies_path': args.movies_path
     }
     
-    # Initialize wandb
+    # Initialize wandb with enhanced monitoring
     wandb_manager = init_wandb_for_training(
         'hybrid', 
         config,
         resume=False
     )
+    
+    # Enable detailed system monitoring
+    import wandb
+    wandb.watch(None, log_freq=100)  # Will be set after model creation
+    
+    # Add custom metrics for bottleneck detection
+    wandb.define_metric("performance/data_loading_time")
+    wandb.define_metric("performance/forward_pass_time") 
+    wandb.define_metric("performance/backward_pass_time")
+    wandb.define_metric("performance/batch_processing_time")
+    wandb.define_metric("performance/gpu_memory_allocated")
+    wandb.define_metric("performance/gpu_memory_cached")
     
     # Override wandb config if provided
     if args.wandb_project:
@@ -343,8 +381,9 @@ def train_hybrid_with_wandb(args):
             metadata, args.embedding_dim, args.hidden_dim, args.dropout
         )
         
-        # Log model architecture
+        # Log model architecture and enable model watching
         wandb_manager.log_model_architecture(model, 'hybrid')
+        wandb.watch(model, log="all", log_freq=500)  # Watch gradients and parameters
         
         # Setup device
         if args.device == 'auto':
@@ -352,7 +391,6 @@ def train_hybrid_with_wandb(args):
         else:
             device = torch.device(args.device)
         
-        logger.info(f"Using device: {device}")
         model = model.to(device)
         
         # Setup training components
@@ -379,22 +417,36 @@ def train_hybrid_with_wandb(args):
             
             # Training phase
             model.train()
-            train_losses = []
-            train_rmses = []
+            train_loss_sum = 0.0
+            train_rmse_sum = 0.0
+            batch_count = 0
             
             for batch_idx, (user_ids, movie_ids, ratings) in enumerate(train_loader):
-                user_ids = user_ids.to(device)
-                movie_ids = movie_ids.to(device)
-                ratings = ratings.to(device).float()
+                batch_start_time = time.time()
+                
+                # Data loading time (time to get to this point)
+                data_load_time = time.time() - batch_start_time
+                
+                user_ids = user_ids.to(device, non_blocking=True)
+                movie_ids = movie_ids.to(device, non_blocking=True)
+                ratings = ratings.to(device, non_blocking=True).float()
                 
                 optimizer.zero_grad()
                 
-                # Forward pass with mixed precision if available
+                # Forward pass timing
+                forward_start = time.time()
                 if scaler:
                     with autocast():
                         predictions = model(user_ids, movie_ids)
                         loss = criterion(predictions, ratings)
-                    
+                else:
+                    predictions = model(user_ids, movie_ids)
+                    loss = criterion(predictions, ratings)
+                forward_time = time.time() - forward_start
+                
+                # Backward pass timing  
+                backward_start = time.time()
+                if scaler:
                     scaler.scale(loss).backward()
                     
                     if args.gradient_clipping:
@@ -404,32 +456,48 @@ def train_hybrid_with_wandb(args):
                     scaler.step(optimizer)
                     scaler.update()
                 else:
-                    predictions = model(user_ids, movie_ids)
-                    loss = criterion(predictions, ratings)
                     loss.backward()
                     
                     if args.gradient_clipping:
                         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                     
                     optimizer.step()
+                backward_time = time.time() - backward_start
                 
-                # Calculate metrics
-                batch_loss = loss.item()
-                batch_rmse = torch.sqrt(loss).item()
+                # Total batch time
+                total_batch_time = time.time() - batch_start_time
                 
-                train_losses.append(batch_loss)
-                train_rmses.append(batch_rmse)
+                # Accumulate metrics without .item() calls (keep on GPU)
+                train_loss_sum += loss.detach()
+                train_rmse_sum += torch.sqrt(loss.detach())
+                batch_count += 1
                 
-                # Log batch metrics
+                # Log performance metrics every 100 batches
                 if batch_idx % 100 == 0:
-                    additional_metrics = {
-                        'rmse': batch_rmse,
-                        'gradient_norm': torch.nn.utils.clip_grad_norm_(model.parameters(), float('inf')).item()
-                    }
+                    # GPU memory metrics
+                    if device.type == 'cuda':
+                        gpu_allocated = torch.cuda.memory_allocated(device) / 1024**3  # GB
+                        gpu_cached = torch.cuda.memory_reserved(device) / 1024**3  # GB
+                    else:
+                        gpu_allocated = gpu_cached = 0
                     
+                    # Log to wandb
+                    wandb.log({
+                        "performance/data_loading_time": data_load_time * 1000,  # ms
+                        "performance/forward_pass_time": forward_time * 1000,   # ms  
+                        "performance/backward_pass_time": backward_time * 1000, # ms
+                        "performance/batch_processing_time": total_batch_time * 1000, # ms
+                        "performance/gpu_memory_allocated": gpu_allocated,
+                        "performance/gpu_memory_cached": gpu_cached,
+                        "epoch": epoch,
+                        "batch": batch_idx
+                    })
+                
+                # Training logging every 500 batches
+                if batch_idx % 500 == 0:
                     training_logger.log_batch(
                         epoch, batch_idx, len(train_loader),
-                        batch_loss, len(user_ids), additional_metrics
+                        loss.item(), len(user_ids), {}
                     )
             
             # Validation phase
@@ -449,10 +517,10 @@ def train_hybrid_with_wandb(args):
                     val_losses.append(loss.item())
                     val_rmses.append(torch.sqrt(loss).item())
             
-            # Calculate epoch metrics
-            train_loss = np.mean(train_losses)
+            # Calculate epoch metrics (convert to CPU only once)
+            train_loss = (train_loss_sum / batch_count).item()
             val_loss = np.mean(val_losses)
-            train_rmse = np.mean(train_rmses)
+            train_rmse = (train_rmse_sum / batch_count).item()
             val_rmse = np.mean(val_rmses)
             
             # Log epoch summary
@@ -462,6 +530,12 @@ def train_hybrid_with_wandb(args):
             
             # Learning rate scheduling
             scheduler.step(val_loss)
+            
+            # Memory cleanup every few epochs
+            if epoch % 5 == 0:
+                if device.type == 'cuda':
+                    torch.cuda.empty_cache()
+                gc.collect()
             
             # Early stopping and model saving
             if val_loss < best_val_loss:
@@ -502,11 +576,9 @@ def train_hybrid_with_wandb(args):
             else:
                 patience_counter += 1
                 if patience_counter >= args.early_stopping_patience:
-                    logger.info(f"Early stopping triggered after {epoch + 1} epochs")
                     break
         
         # Test evaluation
-        logger.info("Evaluating on test set...")
         model.eval()
         test_losses = []
         test_rmses = []
@@ -538,12 +610,10 @@ def train_hybrid_with_wandb(args):
         
         wandb_manager.log_metrics({f'final/{k}': v for k, v in final_metrics.items()})
         
-        logger.info(f"Training completed! Test RMSE: {test_rmse:.4f}")
-        
         return model, final_metrics
         
     except Exception as e:
-        logger.error(f"Training failed: {e}")
+        print(f"Training failed: {e}")
         raise
     finally:
         # Always finish wandb run
@@ -555,23 +625,17 @@ def main():
     setup_logging()
     args = parse_args()
     
-    logger.info("Starting Hybrid Recommender training with Wandb integration")
-    logger.info(f"Configuration: {vars(args)}")
-    
     # Check if datasets exist
     if not os.path.exists(args.ratings_path):
-        logger.error(f"Ratings file not found: {args.ratings_path}")
+        print(f"Error: Ratings file not found: {args.ratings_path}")
         return
     
     if not os.path.exists(args.movies_path):
-        logger.error(f"Movies file not found: {args.movies_path}")
+        print(f"Error: Movies file not found: {args.movies_path}")
         return
     
     # Train model
     model, metrics = train_hybrid_with_wandb(args)
-    
-    logger.info("Training completed successfully!")
-    logger.info(f"Final metrics: {metrics}")
 
 
 if __name__ == "__main__":

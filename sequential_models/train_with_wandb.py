@@ -192,14 +192,10 @@ class AttentionalSequentialRecommender(nn.Module):
 
 
 def setup_logging():
-    """Setup logging configuration"""
+    """Minimal logging setup - Wandb handles most logging"""
     logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(f"sequential_training_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"),
-            logging.StreamHandler(sys.stdout)
-        ]
+        level=logging.WARNING,
+        format='%(levelname)s - %(message)s'
     )
 
 
@@ -288,11 +284,17 @@ def prepare_sequential_data(ratings_path, min_interactions=20, min_seq_length=5,
     Returns:
         train_loader, val_loader, test_loader, metadata
     """
-    logger.info("Loading and preparing sequential data...")
     
-    # Load ratings
-    ratings_df = pd.read_csv(ratings_path)
-    logger.info(f"Loaded {len(ratings_df)} ratings")
+    # Load ratings with chunked loading for large files
+    file_size = os.path.getsize(ratings_path) / (1024 * 1024)  # Size in MB
+    
+    if file_size > 500:  # Use chunked loading for files > 500MB
+        chunks = []
+        for chunk in pd.read_csv(ratings_path, chunksize=50000):
+            chunks.append(chunk)
+        ratings_df = pd.concat(chunks, ignore_index=True)
+    else:
+        ratings_df = pd.read_csv(ratings_path)
     
     # Sort by user and timestamp
     ratings_df = ratings_df.sort_values(['userId', 'timestamp'])
@@ -302,7 +304,6 @@ def prepare_sequential_data(ratings_path, min_interactions=20, min_seq_length=5,
     valid_users = user_counts[user_counts >= min_interactions].index
     ratings_df = ratings_df[ratings_df['userId'].isin(valid_users)]
     
-    logger.info(f"After filtering: {len(ratings_df)} ratings, {ratings_df['userId'].nunique()} users")
     
     # Create item encoder
     item_encoder = LabelEncoder()
@@ -324,7 +325,6 @@ def prepare_sequential_data(ratings_path, min_interactions=20, min_seq_length=5,
                 user_sequences.append(seq)
                 user_targets.append(target)
     
-    logger.info(f"Created {len(user_sequences)} sequences")
     
     # Split data
     train_val_seq, test_seq, train_val_targets, test_targets = train_test_split(
@@ -334,17 +334,40 @@ def prepare_sequential_data(ratings_path, min_interactions=20, min_seq_length=5,
         train_val_seq, train_val_targets, test_size=val_size/(1-test_size), random_state=42
     )
     
-    logger.info(f"Split: Train={len(train_seq)}, Val={len(val_seq)}, Test={len(test_seq)}")
     
     # Create datasets
     train_dataset = SequentialDataset(train_seq, train_targets, max_seq_length)
     val_dataset = SequentialDataset(val_seq, val_targets, max_seq_length)
     test_dataset = SequentialDataset(test_seq, test_targets, max_seq_length)
     
-    # Create data loaders
-    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True, num_workers=4)
-    val_loader = DataLoader(val_dataset, batch_size=128, shuffle=False, num_workers=4)
-    test_loader = DataLoader(test_dataset, batch_size=128, shuffle=False, num_workers=4)
+    # Create optimized data loaders for Ryzen 3900X
+    train_loader = DataLoader(
+        train_dataset, 
+        batch_size=256,  # Moderate batch for sequential complexity
+        shuffle=True, 
+        num_workers=12,
+        pin_memory=True,
+        persistent_workers=True,
+        prefetch_factor=2
+    )
+    val_loader = DataLoader(
+        val_dataset, 
+        batch_size=512,
+        shuffle=False, 
+        num_workers=8,
+        pin_memory=True,
+        persistent_workers=True,
+        prefetch_factor=2
+    )
+    test_loader = DataLoader(
+        test_dataset, 
+        batch_size=512,
+        shuffle=False, 
+        num_workers=8,
+        pin_memory=True,
+        persistent_workers=True,
+        prefetch_factor=2
+    )
     
     # Metadata
     metadata = {
@@ -454,7 +477,6 @@ def train_sequential_with_wandb(args):
         else:
             device = torch.device(args.device)
         
-        logger.info(f"Using device: {device}")
         model = model.to(device)
         
         # Setup training components
@@ -593,11 +615,9 @@ def train_sequential_with_wandb(args):
             else:
                 patience_counter += 1
                 if patience_counter >= args.early_stopping_patience:
-                    logger.info(f"Early stopping triggered after {epoch + 1} epochs")
                     break
         
         # Test evaluation
-        logger.info("Evaluating on test set...")
         model.eval()
         test_losses = []
         test_accuracies = []
@@ -632,7 +652,6 @@ def train_sequential_with_wandb(args):
         
         wandb_manager.log_metrics({f'final/{k}': v for k, v in final_metrics.items()})
         
-        logger.info(f"Training completed! Test Accuracy: {test_accuracy:.4f}")
         
         return model, final_metrics
         
@@ -649,8 +668,6 @@ def main():
     setup_logging()
     args = parse_args()
     
-    logger.info("Starting Sequential model training with Wandb integration")
-    logger.info(f"Configuration: {vars(args)}")
     
     # Check if datasets exist
     if not os.path.exists(args.ratings_path):
@@ -660,8 +677,6 @@ def main():
     # Train model
     model, metrics = train_sequential_with_wandb(args)
     
-    logger.info("Training completed successfully!")
-    logger.info(f"Final metrics: {metrics}")
 
 
 if __name__ == "__main__":
