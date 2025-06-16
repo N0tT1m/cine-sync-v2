@@ -87,6 +87,22 @@ except ImportError as e:
     models_available['tv_recommender'] = False
     print(f"✗ TV Recommender import failed: {e}")
 
+# Original Hybrid Recommender Model
+try:
+    hybrid_model_path = os.path.join(project_root, 'lupe(python)', 'models')
+    
+    spec = importlib.util.spec_from_file_location("hybrid_recommender", 
+                                                 os.path.join(hybrid_model_path, "hybrid_recommender.py"))
+    hybrid_recommender = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hybrid_recommender)
+    
+    HybridRecommenderModel = hybrid_recommender.HybridRecommenderModel
+    models_available['hybrid_recommender'] = True
+    print("✓ Original Hybrid Recommender model imported")
+except Exception as e:
+    models_available['hybrid_recommender'] = False
+    print(f"✗ Hybrid Recommender import failed: {e}")
+
 def test_model_1_enhanced_two_tower():
     """Test 1: Enhanced Two-Tower Model"""
     print("\n=== Testing Enhanced Two-Tower Model ===")
@@ -374,6 +390,47 @@ def test_model_5_two_tower():
         print(f"✗ Two-Tower Model failed: {e}")
         return False, 0, 0
 
+def test_model_6_hybrid_recommender():
+    """Test 6: Original Hybrid Recommender Model"""
+    print("\n=== Testing Original Hybrid Recommender Model ===")
+    
+    if not models_available['hybrid_recommender']:
+        print("✗ Hybrid Recommender model not available")
+        return False, 0, 0
+    
+    try:
+        torch.cuda.empty_cache()
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        initial_memory = torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
+        
+        model = HybridRecommenderModel(
+            num_users=10000,
+            num_items=50000,
+            embedding_dim=64,
+            hidden_dim=128
+        ).to(device)
+        
+        # Test forward pass
+        batch_size = 128
+        user_ids = torch.randint(0, 10000, (batch_size,)).to(device)
+        item_ids = torch.randint(0, 50000, (batch_size,)).to(device)
+        
+        with torch.no_grad():
+            output = model(user_ids, item_ids)
+        
+        memory_used = (torch.cuda.memory_allocated() - initial_memory) / 1e9 if torch.cuda.is_available() else 0
+        params = sum(p.numel() for p in model.parameters())
+        
+        print(f"✓ Original Hybrid Recommender: Memory={memory_used:.2f}GB, Params={params:,}, Output={output.shape}")
+        
+        del model
+        torch.cuda.empty_cache()
+        return True, memory_used, params
+        
+    except Exception as e:
+        print(f"✗ Original Hybrid Recommender failed: {e}")
+        return False, 0, 0
+
 def main():
     print("=== CineSync v2 Model Compatibility Test ===")
     print(f"PyTorch version: {torch.__version__}")
@@ -411,6 +468,11 @@ def main():
     if models_available['two_tower']:
         success, memory, params = test_model_5_two_tower()
         results.append(('Two-Tower Model', success, memory, params))
+    
+    # Test 6: Original Hybrid Recommender Model (if available)
+    if models_available['hybrid_recommender']:
+        success, memory, params = test_model_6_hybrid_recommender()
+        results.append(('Original Hybrid Recommender', success, memory, params))
     
     # Test concurrent inference
     concurrent_success = test_concurrent_inference()
