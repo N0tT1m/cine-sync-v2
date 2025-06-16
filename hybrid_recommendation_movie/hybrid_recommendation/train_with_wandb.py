@@ -32,7 +32,7 @@ from wandb_training_integration import train_with_wandb, WandbTrainingLogger
 
 # Import existing modules
 from config import load_config
-from models import HybridRecommenderModel, MovieDataset, create_model, save_model, load_model
+from models.movie_recommender import MovieHybridRecommender, MovieRecommendationSystem
 from utils import DatabaseManager, load_ratings_data, load_movies_data
 
 logger = logging.getLogger(__name__)
