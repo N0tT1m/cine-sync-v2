@@ -8,13 +8,24 @@
 /kaggle_dataset/
 /imdb/
 
-# Model files (generated during training)
-/models/*
-!/models/*.py
-/lupe(python)/models/*
-!/lupe(python)/models/*.py
+# Model files (generated during training - exclude large files but keep Python code)
 *.pt
 *.pkl
+
+# Allow all Python model files
+!/models/*.py
+!/lupe(python)/models/*.py
+!/advanced_models/*.py
+!/neural_collaborative_filtering/**/*.py
+!/sequential_models/**/*.py
+!/two_tower_model/**/*.py
+!/hybrid_recommendation/**/*.py
+
+# But exclude large trained model files
+/models/*.pt
+/models/*.pkl
+/lupe(python)/models/*.pt
+/lupe(python)/models/*.pkl
 
 # Data files (too large for git)
 *.csv
