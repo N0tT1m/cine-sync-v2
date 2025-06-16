@@ -23,7 +23,7 @@ from sklearn.preprocessing import MinMaxScaler
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 from torch.utils.data import DataLoader, Dataset
 import pickle
 import logging
@@ -932,7 +932,7 @@ def train_model(train_data, val_data, movies_df, genres, mappings, device, epoch
         criterion = nn.MSELoss()
         optimizer = optim.AdamW(model.parameters(), lr=0.002, weight_decay=1e-5)
         scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=2)
-        scaler = GradScaler()
+        scaler = GradScaler('cuda')
         
         # Training loop
         logger.info("Starting training")
@@ -977,7 +977,7 @@ def train_model(train_data, val_data, movies_df, genres, mappings, device, epoch
                 
                 optimizer.zero_grad()
                 
-                with autocast():
+                with autocast('cuda'):
                     outputs = model(user_ids, movie_ids, genre_feats)
                     loss = criterion(outputs, targets)
                 

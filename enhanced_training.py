@@ -11,7 +11,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 from torch.utils.data import DataLoader
 import pickle
 import logging
@@ -60,7 +60,7 @@ class EnhancedTrainer:
         # Setup compute device - prefer CUDA for faster training
         self.device = torch.device("cuda" if torch.cuda.is_available() and config.use_cuda else "cpu")
         # Initialize gradient scaler for mixed precision training (RTX 4090 optimization)
-        self.scaler = GradScaler() if self.device.type == 'cuda' else None
+        self.scaler = GradScaler('cuda') if self.device.type == 'cuda' else None
         
         # Initialize enhanced data loader that handles all dataset formats
         self.data_loader = EnhancedDatasetLoader()
@@ -180,7 +180,7 @@ class EnhancedTrainer:
             
             # Use mixed precision training if available (RTX 4090 optimization)
             if self.scaler:
-                with autocast():  # Automatic mixed precision for faster training
+                with autocast('cuda'):  # Automatic mixed precision for faster training
                     predictions = model(users, items).squeeze()
                     loss = criterion(predictions, ratings)
                 
@@ -238,7 +238,7 @@ class EnhancedTrainer:
                 
                 # Use same precision as training for consistency
                 if self.scaler:
-                    with autocast():  # Mixed precision inference
+                    with autocast('cuda'):  # Mixed precision inference
                         predictions = model(users, items).squeeze()
                         loss = criterion(predictions, ratings)
                 else:

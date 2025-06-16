@@ -609,7 +609,7 @@ def train_hybrid_with_wandb(args):
         wandb_manager.log_metrics({f'final/{k}': v for k, v in final_metrics.items()}, 
                                 step=training_logger.get_current_step())
         
-        return model, final_metrics
+        return model, final_metrics, metadata
         
     except KeyboardInterrupt:
         print("\nTraining interrupted by user. Saving current state...")
@@ -649,8 +649,107 @@ def main():
         print(f"Error: Movies file not found: {args.movies_path}")
         return
     
-    # Train model
-    model, metrics = train_hybrid_with_wandb(args)
+    # Train model and get metadata
+    model, metrics, data_metadata = train_hybrid_with_wandb(args)
+    
+    # Save all model artifacts
+    print("Saving model artifacts...")
+    
+    # Save model checkpoint
+    model_path = "best_hybrid_model.pt"
+    torch.save({
+        'model_state_dict': model.state_dict(),
+        'model_architecture': str(model),
+        'final_metrics': metrics,
+        'model_config': {
+            'embedding_dim': args.embedding_dim,
+            'hidden_dim': args.hidden_dim,
+            'dropout': args.dropout
+        }
+    }, model_path)
+    print(f"Model saved to {model_path}")
+    
+    # Save ID mappings for inference
+    id_mappings = {
+        'user_id_to_idx': data_metadata['user_id_to_idx'],
+        'movie_id_to_idx': data_metadata['movie_id_to_idx'],
+        'idx_to_user_id': {v: k for k, v in data_metadata['user_id_to_idx'].items()},
+        'idx_to_movie_id': {v: k for k, v in data_metadata['movie_id_to_idx'].items()}
+    }
+    
+    with open('id_mappings.pkl', 'wb') as f:
+        pickle.dump(id_mappings, f)
+    print("ID mappings saved to id_mappings.pkl")
+    
+    # Save model metadata (compatible with old format)
+    model_metadata = {
+        'num_users': data_metadata['num_users'],
+        'num_movies': data_metadata['num_movies'],
+        'embedding_dim': args.embedding_dim,
+        'hidden_dim': args.hidden_dim,
+        'dropout': args.dropout,
+        'final_metrics': metrics,
+        'model_architecture': str(model)
+    }
+    
+    with open('model_metadata.pkl', 'wb') as f:
+        pickle.dump(model_metadata, f)
+    print("Model metadata saved to model_metadata.pkl")
+    
+    # Save training metadata
+    training_metadata = {
+        'final_metrics': metrics,
+        'training_args': vars(args),
+        'data_stats': data_metadata,
+        'model_architecture': str(model),
+        'timestamp': datetime.now().isoformat()
+    }
+    
+    with open('hybrid_metadata.pkl', 'wb') as f:
+        pickle.dump(training_metadata, f)
+    print("Training metadata saved to hybrid_metadata.pkl")
+    
+    # Save training history (if available)
+    if hasattr(model, 'training_history'):
+        with open('training_history.pkl', 'wb') as f:
+            pickle.dump(model.training_history, f)
+        print("Training history saved to training_history.pkl")
+    
+    # Create movie lookup file (simplified version)
+    movie_lookup = {
+        'movie_id_to_idx': data_metadata['movie_id_to_idx'],
+        'idx_to_movie_id': {v: k for k, v in data_metadata['movie_id_to_idx'].items()},
+        'num_movies': data_metadata['num_movies']
+    }
+    
+    with open('movie_lookup.pkl', 'wb') as f:
+        pickle.dump(movie_lookup, f)
+    print("Movie lookup saved to movie_lookup.pkl")
+    
+    # Create backup of movie lookup
+    with open('movie_lookup_backup.pkl', 'wb') as f:
+        pickle.dump(movie_lookup, f)
+    print("Movie lookup backup saved to movie_lookup_backup.pkl")
+    
+    # Create a simple rating scaler file (for compatibility)
+    rating_scaler = {
+        'min_rating': data_metadata['rating_range'][0],
+        'max_rating': data_metadata['rating_range'][1],
+        'mean_rating': 3.0,  # Typical movie rating mean
+        'std_rating': 1.0   # Typical movie rating std
+    }
+    
+    with open('rating_scaler.pkl', 'wb') as f:
+        pickle.dump(rating_scaler, f)
+    print("Rating scaler saved to rating_scaler.pkl")
+    
+    # Save main model file (alternative name for compatibility)
+    torch.save(model.state_dict(), 'recommendation_model.pt')
+    print("Model state dict saved to recommendation_model.pt")
+    
+    print("All artifacts saved successfully!")
+    print(f"Final test loss: {metrics.get('test_loss', 'N/A'):.4f}")
+    print(f"Final test RMSE: {metrics.get('test_rmse', 'N/A'):.4f}")
 
 
 if __name__ == "__main__":

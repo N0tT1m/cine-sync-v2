@@ -13,7 +13,7 @@ from sklearn.preprocessing import MinMaxScaler
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 from torch.utils.data import DataLoader
 import pickle
 import logging
@@ -70,7 +70,7 @@ class TVShowTrainer:
     def __init__(self, config):
         self.config = config
         self.device = setup_gpu()
-        self.scaler = GradScaler() if self.device.type == 'cuda' else None
+        self.scaler = GradScaler('cuda') if self.device.type == 'cuda' else None
         
         # Training parameters
         self.batch_size = getattr(config.model, 'batch_size', 64)
@@ -289,7 +289,7 @@ class TVShowTrainer:
             
             # Forward pass with mixed precision if using CUDA
             if self.scaler:
-                with autocast():
+                with autocast('cuda'):
                     predictions = model(user_ids, show_ids, genre_features, tv_features)
                     loss = criterion(predictions, ratings)
                 
