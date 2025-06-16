@@ -23,17 +23,96 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+
+class MovieDataset(Dataset):
+    """PyTorch Dataset for movie ratings"""
+    
+    def __init__(self, ratings_df):
+        """Initialize dataset with ratings dataframe
+        
+        Args:
+            ratings_df: DataFrame with columns ['user_idx', 'movie_idx', 'rating']
+        """
+        self.user_ids = torch.tensor(ratings_df['user_idx'].values, dtype=torch.long)
+        self.movie_ids = torch.tensor(ratings_df['movie_idx'].values, dtype=torch.long)
+        self.ratings = torch.tensor(ratings_df['rating'].values, dtype=torch.float32)
+    
+    def __len__(self):
+        return len(self.ratings)
+    
+    def __getitem__(self, idx):
+        return self.user_ids[idx], self.movie_ids[idx], self.ratings[idx]
+
+
+class HybridRecommenderModel(nn.Module):
+    """Hybrid recommender model combining collaborative filtering and content features"""
+    
+    def __init__(self, num_users, num_items, embedding_dim=64, hidden_dim=128, dropout=0.2):
+        super(HybridRecommenderModel, self).__init__()
+        
+        # Embeddings
+        self.user_embedding = nn.Embedding(num_users, embedding_dim)
+        self.item_embedding = nn.Embedding(num_items, embedding_dim)
+        
+        # Bias terms
+        self.user_bias = nn.Embedding(num_users, 1)
+        self.item_bias = nn.Embedding(num_items, 1)
+        self.global_bias = nn.Parameter(torch.zeros(1))
+        
+        # MLP layers
+        self.mlp = nn.Sequential(
+            nn.Linear(embedding_dim * 2, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim // 2, 1)
+        )
+        
+        # Initialize weights
+        self._init_weights()
+    
+    def _init_weights(self):
+        """Initialize model weights"""
+        nn.init.xavier_uniform_(self.user_embedding.weight)
+        nn.init.xavier_uniform_(self.item_embedding.weight)
+        nn.init.zeros_(self.user_bias.weight)
+        nn.init.zeros_(self.item_bias.weight)
+    
+    def forward(self, user_ids, item_ids):
+        """Forward pass"""
+        # Get embeddings
+        user_emb = self.user_embedding(user_ids)
+        item_emb = self.item_embedding(item_ids)
+        
+        # Get biases
+        user_bias = self.user_bias(user_ids).squeeze()
+        item_bias = self.item_bias(item_ids).squeeze()
+        
+        # MLP component
+        mlp_input = torch.cat([user_emb, item_emb], dim=-1)
+        mlp_output = self.mlp(mlp_input).squeeze()
+        
+        # Combine components
+        output = self.global_bias + user_bias + item_bias + mlp_output
+        
+        return output
+
 # Add project root to path
-sys.path.append(str(Path(__file__).parent.parent))
+sys.path.append(str(Path(__file__).parent.parent.parent))
 
 # Import wandb utilities
 from wandb_config import init_wandb_for_training, WandbManager
 from wandb_training_integration import train_with_wandb, WandbTrainingLogger
 
 # Import existing modules
-from config import load_config
-from models import HybridRecommenderModel, MovieDataset, create_model, save_model, load_model
-from utils import DatabaseManager, load_ratings_data, load_movies_data
+try:
+    from config import load_config
+    from utils import DatabaseManager, load_ratings_data, load_movies_data
+except ImportError:
+    # Fallback if imports fail
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -256,7 +335,7 @@ def train_hybrid_with_wandb(args):
         criterion = nn.MSELoss()
         optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode='min', factor=0.5, patience=5, verbose=True
+            optimizer, mode='min', factor=0.5, patience=5
         )
         
         # Mixed precision training

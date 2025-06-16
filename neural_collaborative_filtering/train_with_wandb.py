@@ -350,7 +350,7 @@ def train_ncf_with_wandb(args):
         criterion = nn.MSELoss()
         optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode='min', factor=0.5, patience=5, verbose=True
+            optimizer, mode='min', factor=0.5, patience=5
         )
         
         # Training logger
