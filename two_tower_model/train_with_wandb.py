@@ -211,14 +211,10 @@ class EnhancedTwoTowerModel(nn.Module):
 
 
 def setup_logging():
-    """Setup logging configuration"""
+    """Minimal logging setup - Wandb handles most logging"""
     logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(f"two_tower_training_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"),
-            logging.StreamHandler(sys.stdout)
-        ]
+        level=logging.WARNING,
+        format='%(levelname)s - %(message)s'
     )
 
 
@@ -302,11 +298,17 @@ def prepare_data(ratings_path, min_interactions=20, test_size=0.2, val_size=0.1)
     Returns:
         train_loader, val_loader, test_loader, metadata
     """
-    logger.info("Loading and preparing Two-Tower data...")
     
-    # Load ratings
-    ratings_df = pd.read_csv(ratings_path)
-    logger.info(f"Loaded {len(ratings_df)} ratings")
+    # Load ratings with chunked loading for large files
+    file_size = os.path.getsize(ratings_path) / (1024 * 1024)  # Size in MB
+    
+    if file_size > 500:  # Use chunked loading for files > 500MB
+        chunks = []
+        for chunk in pd.read_csv(ratings_path, chunksize=50000):
+            chunks.append(chunk)
+        ratings_df = pd.concat(chunks, ignore_index=True)
+    else:
+        ratings_df = pd.read_csv(ratings_path)
     
     # Filter users and items with minimum interactions
     user_counts = ratings_df['userId'].value_counts()
@@ -320,9 +322,6 @@ def prepare_data(ratings_path, min_interactions=20, test_size=0.2, val_size=0.1)
         (ratings_df['movieId'].isin(valid_items))
     ]
     
-    logger.info(f"After filtering: {len(ratings_df)} ratings, "
-                f"{ratings_df['userId'].nunique()} users, "
-                f"{ratings_df['movieId'].nunique()} items")
     
     # Create label encoders for contiguous indices
     user_encoder = LabelEncoder()
@@ -340,7 +339,6 @@ def prepare_data(ratings_path, min_interactions=20, test_size=0.2, val_size=0.1)
     train_val_df, test_df = train_test_split(ratings_df, test_size=test_size, random_state=42)
     train_df, val_df = train_test_split(train_val_df, test_size=val_size/(1-test_size), random_state=42)
     
-    logger.info(f"Split: Train={len(train_df)}, Val={len(val_df)}, Test={len(test_df)}")
     
     # Create datasets
     train_dataset = TwoTowerDataset(
@@ -359,10 +357,34 @@ def prepare_data(ratings_path, min_interactions=20, test_size=0.2, val_size=0.1)
         test_df['rating_norm'].values
     )
     
-    # Create data loaders (smaller batch size for Two-Tower due to complexity)
-    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=4)
-    val_loader = DataLoader(val_dataset, batch_size=64, shuffle=False, num_workers=4)
-    test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False, num_workers=4)
+    # Create optimized data loaders for Ryzen 3900X (moderate batch size for Two-Tower complexity)
+    train_loader = DataLoader(
+        train_dataset, 
+        batch_size=256,  # Moderate batch size for complex model
+        shuffle=True, 
+        num_workers=12,
+        pin_memory=True,
+        persistent_workers=True,
+        prefetch_factor=2
+    )
+    val_loader = DataLoader(
+        val_dataset, 
+        batch_size=512,
+        shuffle=False, 
+        num_workers=8,
+        pin_memory=True,
+        persistent_workers=True,
+        prefetch_factor=2
+    )
+    test_loader = DataLoader(
+        test_dataset, 
+        batch_size=512,
+        shuffle=False, 
+        num_workers=8,
+        pin_memory=True,
+        persistent_workers=True,
+        prefetch_factor=2
+    )
     
     # Metadata
     metadata = {

@@ -8,6 +8,19 @@ A comprehensive AI-powered recommendation platform featuring multiple deep learn
 
 CineSync v2 is a multi-model AI recommendation platform featuring six distinct deep learning approaches for movie and TV show recommendations. With access to 32M+ movie ratings and 12M+ anime reviews, the platform provides comprehensive training grounds for advanced recommendation systems.
 
+**🔧 Recent Updates:**
+- **Performance Bottlenecks Fixed**: Optimized memory usage, training speed, and inference performance across all models
+- **Enhanced WandB Support**: 
+  - Real-time training metrics logging (loss, accuracy, validation scores)
+  - Hyperparameter sweep integration for automated optimization
+  - Model artifact versioning and storage
+  - Training visualization dashboards with custom charts
+  - Experiment comparison and A/B testing capabilities
+  - GPU utilization and system resource monitoring
+  - Automatic model checkpointing with WandB integration
+  - Custom metrics tracking for recommendation quality (RMSE, Hit Rate@K, Coverage)
+- **Training Pipeline Improvements**: Streamlined data processing, better error handling, and automated checkpointing
+
 **🎯 Six RTX 4090-Optimized Model Implementations:**
 
 ### 🏗️ **Enhanced Two-Tower Model** (`/advanced_models`)
@@ -423,6 +436,85 @@ tv_embedding = tv_feature_network(episode_features)
 
 # Combined prediction
 tv_prediction = tv_model(user_emb, show_emb, genre_emb, tv_embedding)
+```
+
+### 📊 WandB Integration & Experiment Tracking
+
+#### **Enhanced WandB Features**
+
+CineSync v2 now includes comprehensive Weights & Biases integration for professional-grade experiment tracking:
+
+**🔍 Real-Time Monitoring:**
+```python
+# Automatic logging of training metrics
+wandb.log({
+    'train_loss': train_loss,
+    'val_loss': val_loss, 
+    'learning_rate': optimizer.param_groups[0]['lr'],
+    'gpu_memory_usage': torch.cuda.memory_allocated(),
+    'batch_time': batch_time,
+    'epoch': epoch
+})
+```
+
+**🎯 Recommendation-Specific Metrics:**
+- **RMSE Tracking**: Root Mean Square Error for rating prediction accuracy
+- **Hit Rate@K**: Percentage of relevant items in top-K recommendations (K=5,10,20)
+- **Coverage**: Percentage of items that can be recommended
+- **Diversity**: Intra-list diversity of recommendations
+- **Novelty**: Average popularity rank of recommended items
+
+**🔄 Hyperparameter Sweeps:**
+```yaml
+# wandb_sweep_config.yaml
+program: train_with_wandb.py
+method: bayes
+metric:
+  name: val_rmse
+  goal: minimize
+parameters:
+  learning_rate:
+    min: 0.0001
+    max: 0.01
+  embedding_dim:
+    values: [32, 64, 128, 256]
+  batch_size:
+    values: [16, 32, 64, 128]
+  dropout_rate:
+    min: 0.1
+    max: 0.5
+```
+
+**📈 Custom Dashboards:**
+- Training progress visualization
+- Model comparison charts
+- Resource utilization graphs
+- Recommendation quality heatmaps
+- A/B testing results
+
+**💾 Model Artifact Management:**
+```python
+# Automatic model versioning
+artifact = wandb.Artifact(
+    name=f"cinesync-model-{model_type}",
+    type="model",
+    description=f"CineSync {model_type} model trained on {dataset_name}"
+)
+artifact.add_file("best_model.pt")
+wandb.log_artifact(artifact)
+```
+
+**🚀 Usage Examples:**
+```bash
+# Train with WandB logging
+python train_with_wandb.py --project cinesync-v2 --entity your-team
+
+# Run hyperparameter sweep
+wandb sweep wandb_sweep_config.yaml
+wandb agent your-entity/cinesync-v2/sweep-id
+
+# Compare model variants
+python compare_models.py --wandb-project cinesync-comparison
 ```
 
 ### Training Pipeline

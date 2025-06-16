@@ -118,14 +118,10 @@ logger = logging.getLogger(__name__)
 
 
 def setup_logging():
-    """Setup logging configuration"""
+    """Minimal logging setup - Wandb handles most logging"""
     logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(f"hybrid_training_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"),
-            logging.StreamHandler(sys.stdout)
-        ]
+        level=logging.WARNING,
+        format='%(levelname)s - %(message)s'
     )
 
 
@@ -211,20 +207,30 @@ def parse_args():
     return parser.parse_args()
 
 
+def load_ratings_chunked(filepath, chunk_size=100000):
+    """Load large ratings file in chunks to prevent memory issues"""
+    chunks = []
+    for chunk in pd.read_csv(filepath, chunksize=chunk_size):
+        chunks.append(chunk)
+    return pd.concat(chunks, ignore_index=True)
+
+
 def prepare_data(ratings_path, movies_path, test_size=0.2, val_size=0.1):
     """
-    Prepare data for training with proper ID mappings
+    Prepare data for training with proper ID mappings and chunked loading
     
     Returns:
         train_loader, val_loader, test_loader, metadata
     """
-    logger.info("Loading and preparing data...")
+    # Load data with chunked loading for large files
+    file_size = os.path.getsize(ratings_path) / (1024 * 1024)  # Size in MB
     
-    # Load data
-    ratings_df = pd.read_csv(ratings_path)
+    if file_size > 500:  # Use chunked loading for files > 500MB
+        ratings_df = load_ratings_chunked(ratings_path, chunk_size=50000)
+    else:
+        ratings_df = pd.read_csv(ratings_path)
+        
     movies_df = pd.read_csv(movies_path)
-    
-    logger.info(f"Loaded {len(ratings_df)} ratings and {len(movies_df)} movies")
     
     # Create ID mappings to prevent out-of-bounds errors
     unique_user_ids = sorted(ratings_df['userId'].unique())
@@ -244,23 +250,45 @@ def prepare_data(ratings_path, movies_path, test_size=0.2, val_size=0.1):
     ratings_df['user_idx'] = ratings_df['user_idx'].astype(int)
     ratings_df['movie_idx'] = ratings_df['movie_idx'].astype(int)
     
-    logger.info(f"Mapped to {len(unique_user_ids)} users and {len(unique_movie_ids)} movies")
     
     # Split data
     train_val_df, test_df = train_test_split(ratings_df, test_size=test_size, random_state=42)
     train_df, val_df = train_test_split(train_val_df, test_size=val_size/(1-test_size), random_state=42)
     
-    logger.info(f"Split: Train={len(train_df)}, Val={len(val_df)}, Test={len(test_df)}")
     
     # Create datasets
     train_dataset = MovieDataset(train_df)
     val_dataset = MovieDataset(val_df)
     test_dataset = MovieDataset(test_df)
     
-    # Create data loaders
-    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True, num_workers=4)
-    val_loader = DataLoader(val_dataset, batch_size=256, shuffle=False, num_workers=4)
-    test_loader = DataLoader(test_dataset, batch_size=256, shuffle=False, num_workers=4)
+    # Create optimized data loaders for Ryzen 3900X (12C/24T)
+    train_loader = DataLoader(
+        train_dataset, 
+        batch_size=512,  # Larger batch for better GPU utilization
+        shuffle=True, 
+        num_workers=12,  # Use physical cores (3900X has 12 cores)
+        pin_memory=True,  # Faster GPU transfer
+        persistent_workers=True,  # Avoid recreation overhead
+        prefetch_factor=2  # Pipeline optimization
+    )
+    val_loader = DataLoader(
+        val_dataset, 
+        batch_size=1024,  # Larger batch for validation
+        shuffle=False, 
+        num_workers=8, 
+        pin_memory=True,
+        persistent_workers=True,
+        prefetch_factor=2
+    )
+    test_loader = DataLoader(
+        test_dataset, 
+        batch_size=1024, 
+        shuffle=False, 
+        num_workers=8,
+        pin_memory=True,
+        persistent_workers=True,
+        prefetch_factor=2
+    )
     
     # Metadata
     metadata = {

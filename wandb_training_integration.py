@@ -25,11 +25,12 @@ logger = logging.getLogger(__name__)
 class WandbTrainingLogger:
     """Enhanced training logger with wandb integration"""
     
-    def __init__(self, wandb_manager: WandbManager, model_name: str):
+    def __init__(self, wandb_manager: WandbManager, model_name: str, resume_step: int = 0):
         self.wandb_manager = wandb_manager
         self.model_name = model_name
         self.epoch_start_time = None
         self.batch_times = []
+        self.global_step = resume_step
         
     def log_epoch_start(self, epoch: int, total_epochs: int, lr: float = None):
         """Log epoch start information"""
@@ -71,7 +72,8 @@ class WandbTrainingLogger:
             log_dict['avg_batch_time_sec'] = avg_batch_time
             log_dict['estimated_epoch_time_min'] = (avg_batch_time * total_batches) / 60
         
-        self.wandb_manager.log_metrics(log_dict, step=epoch * total_batches + batch_idx, commit=False)
+        self.wandb_manager.log_metrics(log_dict, step=self.global_step, commit=False)
+        self.global_step += 1
         
         self.batch_times.append(time.time() - batch_start)
     
@@ -100,7 +102,7 @@ class WandbTrainingLogger:
             for key, value in val_metrics.items():
                 log_dict[f'val_{key}_epoch'] = value
         
-        self.wandb_manager.log_metrics(log_dict, step=epoch, commit=True)
+        self.wandb_manager.log_metrics(log_dict, step=self.global_step, commit=True)
         
         logger.info(f"Epoch {epoch} completed - Train Loss: {train_loss:.4f}" + 
                    (f", Val Loss: {val_loss:.4f}" if val_loss else ""))
@@ -154,8 +156,12 @@ def train_with_wandb(model: nn.Module, train_loader: DataLoader, val_loader: Dat
             optimizer, mode='min', factor=0.5, patience=5, verbose=True
         )
         
+        # Get current wandb step for resume
+        import wandb
+        current_step = wandb.run.step if wandb.run and hasattr(wandb.run, 'step') else 0
+        
         # Training logger
-        training_logger = WandbTrainingLogger(wandb_manager, model_name)
+        training_logger = WandbTrainingLogger(wandb_manager, model_name, current_step)
         
         # Training history
         history = {
