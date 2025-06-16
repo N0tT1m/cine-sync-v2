@@ -31,11 +31,11 @@ CineSync v2 is a multi-model AI recommendation platform featuring six distinct d
 - **Features**: Self-attention, positional embeddings, sequence modeling
 - **Best For**: Session-based and time-aware recommendations
 
-### 🏛️ **Hybrid TV Recommender** (`/hybrid_recommendation`)
+### 📺 **Hybrid TV Recommender** (`/hybrid_recommendation_tv`)
 - **Architecture**: TV-specialized with episode and content features
 - **Memory Usage**: ~0.14 GB (0.6% of 24GB) - **✅ RTX 4090 VERIFIED**
 - **Parameters**: 4.7M parameters optimized for TV content
-- **Features**: TV-specific features, genre attention, status modeling
+- **Features**: TV-specific features, genre attention, status modeling, episode/season data
 - **Best For**: TV show recommendations with episodic content understanding
 
 ### 🏗️ **Two-Tower Model** (`/two_tower_model`)
@@ -45,12 +45,12 @@ CineSync v2 is a multi-model AI recommendation platform featuring six distinct d
 - **Features**: Separate user/item towers, temperature scaling, L2 normalization
 - **Best For**: Large-scale production systems with millions of users
 
-### 🎯 **Original Hybrid Recommender** (`/lupe(python)/models`)
-- **Architecture**: Core hybrid collaborative + content-based filtering
+### 🎬 **Movie Hybrid Recommender** (`/hybrid_recommendation_movie`)
+- **Architecture**: Core hybrid collaborative + content-based filtering for movies
 - **Memory Usage**: ~0.12 GB (0.5% of 24GB) - **✅ RTX 4090 VERIFIED**
-- **Parameters**: 3.9M parameters for robust recommendations
-- **Features**: User/item embeddings, neural network fusion, rating prediction
-- **Best For**: Production-ready recommendations with proven architecture
+- **Parameters**: 3.9M parameters for robust movie recommendations
+- **Features**: User/movie embeddings, neural network fusion, rating prediction
+- **Best For**: Production-ready movie recommendations with proven architecture
 
 The platform provides:
 - **Multiple Model Comparison**: Test different approaches on same datasets
@@ -119,20 +119,20 @@ The platform provides:
 ### Component Overview
 
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│     Lupe AI     │    │   PostgreSQL    │    │ Lupe Bot (Py)   │
-│   (Dual Model)  │    │   Database      │    │   (discord.py)  │
-├─────────────────┤    ├─────────────────┤    ├─────────────────┤
-│ • Movie Model   │    │ • User Data     │    │ • Rich Embeds   │
-│ • TV Show Model │    │ • Feedback      │    │ • User Profiles │
-│ • Cross-Content │    │ • Ratings       │    │ • Commands      │
-│ • GPU Training  │    │ • History       │    │ • Real-time     │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
+┌─────────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   CineSync Hybrid   │    │   PostgreSQL    │    │  Discord Bot    │
+│  Recommendation     │    │   Database      │    │   (discord.py)  │
+├─────────────────────┤    ├─────────────────┤    ├─────────────────┤
+│ • Movie System      │    │ • User Data     │    │ • Rich Embeds   │
+│ • TV Shows          │    │ • Feedback      │    │ • User Profiles │
+│ • Cross-Content     │    │ • Ratings       │    │ • Commands      │
+│ • GPU Training      │    │ • History       │    │ • Real-time     │
+└─────────────────────┘    └─────────────────┘    └─────────────────┘
          │                       │                       │
          │                       │                       │
          ▼                       ▼                       ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                  Lupe AI Training Data                         │
+│               CineSync Training Data                            │
 │  📁 /movies/               📁 /tv/                             │
 │  • MovieLens Dataset       • TMDb TV Shows (150K)             │
 │  • TMDB Movies             • MyAnimeList (80M ratings)        │
@@ -142,52 +142,276 @@ The platform provides:
 ```
 
 ### Data Flow
-1. **Training Phase**: Lupe AI trains separate models for movies and TV shows
+1. **Training Phase**: CineSync trains separate hybrid models for movies and TV shows
 2. **Storage Phase**: User preferences and feedback stored in PostgreSQL
-3. **Recommendation Phase**: Lupe AI generates personalized recommendations
+3. **Recommendation Phase**: Hybrid systems generate personalized recommendations
 4. **Cross-Content Learning**: Movie preferences influence TV recommendations and vice versa
 5. **Interaction Phase**: Discord bot presents results and collects user feedback
 
-## 🤖 Lupe AI - Dual Recommendation Engine
+## 🤖 CineSync Hybrid Systems - Dual Recommendation Engines
 
 ### Core Architecture
 
-Lupe AI is the intelligent core of CineSync v2, featuring a sophisticated dual-model approach:
+CineSync v2 features two specialized hybrid recommendation systems working together:
 
-#### **Movie Recommendation Model**
+#### **Movie Hybrid System**
 - **HybridRecommenderModel**: Collaborative filtering + content-based neural network
 - **Training Data**: MovieLens 32M + TMDB + Netflix datasets
 - **Features**: User embeddings, movie embeddings, genre encoding
 - **Optimized For**: 58K movies, 280K users, 32M ratings
+- **Location**: `/hybrid_recommendation_movie/`
 
-#### **TV Show Recommendation Model**
+#### **TV Hybrid System (Television)**
 - **TVShowRecommenderModel**: Enhanced neural network for episodic content
 - **Training Data**: TMDb TV Shows (150K) + MyAnimeList (80M) + IMDb datasets
 - **Features**: Episode count, season data, show status, duration analysis
 - **TV-Specific**: Handles ongoing series, episode progression, binge-watching patterns
+- **Location**: `/hybrid_recommendation_tv/`
 
 #### **Cross-Content Intelligence**
-- **Unified Manager**: `LupeContentManager` orchestrates both models
+- **Unified Manager**: `ContentManager` orchestrates both hybrid systems
 - **Genre Transfer**: Movie genre preferences influence TV recommendations
 - **Viewing Pattern Analysis**: Binge-watching vs. casual viewing detection
 - **Mood Correlation**: Action movie fans → Action TV series recommendations
 
-### Advanced Features
+#### **Additional Model Architectures**
+Beyond the two main hybrid systems, CineSync v2 includes advanced model implementations:
 
-#### **Collaborative Filtering**
+- **Enhanced Two-Tower Model** (`/advanced_models`): Cross-attention and multi-task learning
+- **Neural Collaborative Filtering** (`/neural_collaborative_filtering`): GMF + MLP hybrid
+- **Sequential Models** (`/sequential_models`): Transformer-based temporal modeling
+- **Two-Tower Model** (`/two_tower_model`): Efficient dual-encoder architecture
+
+### Advanced Model Architectures
+
+#### **Enhanced Two-Tower Model Architecture**
 ```python
-# User and content embeddings
-user_embedding = nn.Embedding(num_users, embedding_dim)
-content_embedding = nn.Embedding(num_items, embedding_dim)
-
-# Neural network prediction
-combined = torch.cat([user_emb, content_emb, genre_features], dim=1)
-prediction = neural_network(combined)
+class EnhancedTwoTowerModel(nn.Module):
+    def __init__(self, user_features, item_features, embedding_dim=512):
+        super().__init__()
+        
+        # User Tower with Cross-Attention
+        self.user_tower = nn.Sequential(
+            nn.Linear(user_features, embedding_dim),
+            nn.LayerNorm(embedding_dim),
+            nn.ReLU(),
+            nn.Dropout(0.1)
+        )
+        
+        # Item Tower with Multi-Task Heads
+        self.item_tower = nn.Sequential(
+            nn.Linear(item_features, embedding_dim),
+            nn.LayerNorm(embedding_dim), 
+            nn.ReLU(),
+            nn.Dropout(0.1)
+        )
+        
+        # Cross-Attention Mechanism
+        self.cross_attention = nn.MultiheadAttention(
+            embed_dim=embedding_dim,
+            num_heads=8,
+            dropout=0.1
+        )
+        
+        # Multi-Task Learning Heads
+        self.rating_head = nn.Linear(embedding_dim * 2, 1)
+        self.engagement_head = nn.Linear(embedding_dim * 2, 1)
+        self.temperature = nn.Parameter(torch.ones(1))
+    
+    def forward(self, user_features, item_features):
+        # Separate tower processing
+        user_emb = self.user_tower(user_features)
+        item_emb = self.item_tower(item_features)
+        
+        # Cross-attention between user and item
+        attended_user, _ = self.cross_attention(
+            user_emb.unsqueeze(0), 
+            item_emb.unsqueeze(0), 
+            item_emb.unsqueeze(0)
+        )
+        
+        # Combine representations
+        combined = torch.cat([attended_user.squeeze(0), item_emb], dim=1)
+        
+        # Multi-task predictions with temperature scaling
+        rating = self.rating_head(combined) / self.temperature
+        engagement = self.engagement_head(combined)
+        
+        return rating, engagement
 ```
 
-#### **Content-Based Filtering**
+#### **Neural Collaborative Filtering Architecture**
+```python
+class NCFModel(nn.Module):
+    def __init__(self, num_users, num_items, embedding_dim=128):
+        super().__init__()
+        
+        # GMF (Generalized Matrix Factorization) Path
+        self.gmf_user_embedding = nn.Embedding(num_users, embedding_dim)
+        self.gmf_item_embedding = nn.Embedding(num_items, embedding_dim)
+        
+        # MLP (Multi-Layer Perceptron) Path
+        self.mlp_user_embedding = nn.Embedding(num_users, embedding_dim)
+        self.mlp_item_embedding = nn.Embedding(num_items, embedding_dim)
+        
+        # MLP Layers with Advanced Initialization
+        self.mlp_layers = nn.Sequential(
+            nn.Linear(embedding_dim * 2, 256),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(256, 128),
+            nn.ReLU(), 
+            nn.Dropout(0.2),
+            nn.Linear(128, 64),
+            nn.ReLU()
+        )
+        
+        # Fusion Layer combining GMF and MLP
+        self.fusion = nn.Linear(embedding_dim + 64, 1)
+        
+        # Advanced weight initialization
+        self._init_weights()
+    
+    def forward(self, user_ids, item_ids):
+        # GMF Path: Element-wise product
+        gmf_user = self.gmf_user_embedding(user_ids)
+        gmf_item = self.gmf_item_embedding(item_ids)
+        gmf_output = gmf_user * gmf_item
+        
+        # MLP Path: Neural collaborative filtering
+        mlp_user = self.mlp_user_embedding(user_ids)
+        mlp_item = self.mlp_item_embedding(item_ids)
+        mlp_input = torch.cat([mlp_user, mlp_item], dim=1)
+        mlp_output = self.mlp_layers(mlp_input)
+        
+        # Combine both paths
+        fusion_input = torch.cat([gmf_output, mlp_output], dim=1)
+        prediction = torch.sigmoid(self.fusion(fusion_input)) * 5.0
+        
+        return prediction
+```
+
+#### **Sequential Models Architecture**
+```python
+class AttentionalSequentialModel(nn.Module):
+    def __init__(self, num_items, embedding_dim=256, num_blocks=4, num_heads=8):
+        super().__init__()
+        
+        self.embedding_dim = embedding_dim
+        self.item_embedding = nn.Embedding(num_items, embedding_dim)
+        
+        # Positional Embedding for sequence modeling
+        self.positional_embedding = nn.Embedding(100, embedding_dim)  # max_seq_len=100
+        
+        # Transformer Blocks
+        self.transformer_blocks = nn.ModuleList([
+            nn.TransformerEncoderLayer(
+                d_model=embedding_dim,
+                nhead=num_heads,
+                dim_feedforward=embedding_dim * 4,
+                dropout=0.1,
+                activation='relu'
+            ) for _ in range(num_blocks)
+        ])
+        
+        # Self-Attention for sequence aggregation
+        self.self_attention = nn.MultiheadAttention(
+            embed_dim=embedding_dim,
+            num_heads=num_heads,
+            dropout=0.1
+        )
+        
+        # Prediction head
+        self.prediction_head = nn.Linear(embedding_dim, num_items)
+    
+    def forward(self, item_sequence, sequence_lengths):
+        # Item embeddings
+        item_embs = self.item_embedding(item_sequence)
+        
+        # Add positional embeddings
+        positions = torch.arange(item_sequence.size(1)).unsqueeze(0)
+        pos_embs = self.positional_embedding(positions)
+        sequence_embs = item_embs + pos_embs
+        
+        # Apply transformer blocks for temporal modeling
+        hidden = sequence_embs.transpose(0, 1)  # (seq_len, batch, embed_dim)
+        for transformer in self.transformer_blocks:
+            hidden = transformer(hidden)
+        
+        # Self-attention for sequence aggregation
+        attended, attention_weights = self.self_attention(
+            hidden, hidden, hidden
+        )
+        
+        # Aggregate sequence representation (use last non-padded item)
+        sequence_repr = attended[-1]  # Take last position
+        
+        # Predict next item probabilities
+        predictions = self.prediction_head(sequence_repr)
+        
+        return predictions, attention_weights
+```
+
+#### **Two-Tower Model Architecture**  
+```python
+class TwoTowerModel(nn.Module):
+    def __init__(self, user_features, item_features, embedding_dim=128):
+        super().__init__()
+        
+        # Separate User Tower
+        self.user_tower = nn.Sequential(
+            nn.Linear(user_features, embedding_dim),
+            nn.BatchNorm1d(embedding_dim),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(embedding_dim, embedding_dim),
+            nn.BatchNorm1d(embedding_dim),
+            nn.ReLU()
+        )
+        
+        # Separate Item Tower
+        self.item_tower = nn.Sequential(
+            nn.Linear(item_features, embedding_dim),
+            nn.BatchNorm1d(embedding_dim),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(embedding_dim, embedding_dim),
+            nn.BatchNorm1d(embedding_dim),
+            nn.ReLU()
+        )
+        
+        # Temperature parameter for calibration
+        self.temperature = nn.Parameter(torch.ones(1) * 0.07)
+        
+    def forward(self, user_features, item_features):
+        # Process through separate towers
+        user_emb = self.user_tower(user_features)
+        item_emb = self.item_tower(item_features)
+        
+        # L2 normalization for retrieval
+        user_emb = F.normalize(user_emb, p=2, dim=1)
+        item_emb = F.normalize(item_emb, p=2, dim=1)
+        
+        # Dot product similarity with temperature scaling
+        similarity = torch.sum(user_emb * item_emb, dim=1) / self.temperature
+        
+        return similarity, user_emb, item_emb
+    
+    def retrieve_items(self, user_embedding, item_embeddings, top_k=10):
+        """Efficient retrieval for large-scale systems"""
+        user_emb = F.normalize(user_embedding, p=2, dim=1)
+        item_embs = F.normalize(item_embeddings, p=2, dim=1)
+        
+        # Batch matrix multiplication for efficient retrieval
+        scores = torch.matmul(user_emb, item_embs.T) / self.temperature
+        top_k_scores, top_k_indices = torch.topk(scores, k=top_k, dim=1)
+        
+        return top_k_indices, top_k_scores
+```
+
+#### **Hybrid System Features**
 - **Genre Analysis**: Multi-hot encoding for complex genre combinations
-- **Temporal Features**: Release year trends and era preferences
+- **Temporal Features**: Release year trends and era preferences  
 - **Metadata Integration**: Cast, crew, runtime, ratings analysis
 - **TV-Specific**: Episode count, season structure, show status
 
@@ -1038,15 +1262,24 @@ cine-sync-v2/
 
 ```
 cine-sync-v2/
-├── hybrid_recommendation/           # Traditional hybrid approach
-│   ├── main.py                     # Advanced training (1100 lines)
+├── hybrid_recommendation_movie/     # Movie hybrid system
+│   ├── main.py                     # Movie training and inference
 │   ├── models/
-│   │   ├── hybrid_recommender.py   # Hybrid neural network
-│   │   ├── content_manager.py      # Full content manager
-│   │   └── tv_recommender.py       # TV show specialization
-│   ├── utils/                      # Data processing utilities
-│   ├── tests/                      # Comprehensive test suite
-│   ├── config.py                   # Configuration system
+│   │   ├── hybrid_recommender.py   # Movie recommendation model
+│   │   └── content_manager.py      # Movie content manager
+│   ├── utils/                      # Movie data processing utilities
+│   ├── tests/                      # Movie system test suite
+│   ├── config.py                   # Movie system configuration
+│   └── requirements.txt            # Dependencies
+│
+├── hybrid_recommendation_tv/        # TV show hybrid system
+│   ├── train_tv_shows.py           # TV show training
+│   ├── models/
+│   │   ├── tv_recommender.py       # TV show recommendation model
+│   │   └── content_manager.py      # TV content manager
+│   ├── utils/                      # TV data processing utilities
+│   ├── tests/                      # TV system test suite
+│   ├── config.py                   # TV system configuration
 │   └── requirements.txt            # Dependencies
 │
 ├── neural_collaborative_filtering/  # NCF deep learning approach
@@ -1074,7 +1307,8 @@ cine-sync-v2/
     ├── ml-32m/                     # MovieLens 32M dataset
     ├── tv/                         # TV show datasets
     ├── tmdb/                       # TMDB data
-    ├── lupe(python)/               # Discord bot
+    ├── hybrid_recommendation_movie/     # Movie system (includes Discord bot)
+    ├── hybrid_recommendation_tv/        # TV show system
     ├── lupe-server/                # Rust inference server
     └── README.md                   # This file
 ```
@@ -1097,7 +1331,7 @@ mkdir movies tv models
 #### 2. Python Environment Setup
 ```cmd
 # Navigate to Python bot directory
-cd lupe(python)
+cd hybrid_recommendation_movie
 
 # Create virtual environment
 python -m venv .venv
@@ -1139,7 +1373,7 @@ chmod +x setup_docker_postgres.bat
 ./setup_docker_postgres.bat
 
 # Setup Python environment
-cd lupe\(python\)
+cd hybrid_recommendation_movie
 python3 -m venv .venv
 source .venv/bin/activate
 pip install discord.py torch pandas scikit-learn numpy psycopg2 python-dotenv
@@ -1453,7 +1687,7 @@ docker-compose up -d postgres
 docker-compose exec postgres pg_isready -U postgres -d cinesync
 
 # Start Discord bot
-cd lupe(python)
+cd hybrid_recommendation_movie
 python main.py
 ```
 
@@ -1511,7 +1745,7 @@ cd cine-sync-v2
 
 # Setup development environment
 setup_docker_postgres.bat
-cd lupe(python)
+cd hybrid_recommendation_movie
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
