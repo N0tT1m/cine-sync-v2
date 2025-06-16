@@ -13,7 +13,7 @@ from sklearn.preprocessing import MinMaxScaler
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 from torch.utils.data import DataLoader, Dataset
 import pickle
 import logging
@@ -400,7 +400,7 @@ def train_hybrid_with_wandb(args):
         )
         
         # Mixed precision training
-        scaler = GradScaler() if device.type == 'cuda' else None
+        scaler = GradScaler('cuda') if device.type == 'cuda' else None
         
         # Training logger
         training_logger = WandbTrainingLogger(wandb_manager, 'hybrid')
@@ -435,7 +435,7 @@ def train_hybrid_with_wandb(args):
                 # Forward pass timing
                 forward_start = time.time()
                 if scaler:
-                    with autocast():
+                    with autocast('cuda'):
                         predictions = model(user_ids, movie_ids)
                         loss = criterion(predictions, ratings)
                 else:
@@ -480,23 +480,20 @@ def train_hybrid_with_wandb(args):
                     else:
                         gpu_allocated = gpu_cached = 0
                     
-                    # Log to wandb
-                    wandb.log({
+                    # Log performance metrics through training logger to maintain step consistency
+                    performance_metrics = {
                         "performance/data_loading_time": data_load_time * 1000,  # ms
                         "performance/forward_pass_time": forward_time * 1000,   # ms  
                         "performance/backward_pass_time": backward_time * 1000, # ms
                         "performance/batch_processing_time": total_batch_time * 1000, # ms
                         "performance/gpu_memory_allocated": gpu_allocated,
                         "performance/gpu_memory_cached": gpu_cached,
-                        "epoch": epoch,
-                        "batch": batch_idx
-                    })
-                
-                # Training logging every 500 batches
-                if batch_idx % 500 == 0:
+                    }
+                    
+                    # Use training logger for consistent step tracking
                     training_logger.log_batch(
                         epoch, batch_idx, len(train_loader),
-                        loss.item(), len(user_ids), {}
+                        loss.item(), len(user_ids), performance_metrics
                     )
             
             # Validation phase
@@ -611,12 +608,28 @@ def train_hybrid_with_wandb(args):
         
         return model, final_metrics
         
+    except KeyboardInterrupt:
+        print("\nTraining interrupted by user. Saving current state...")
+        # Save checkpoint if model exists
+        if 'model' in locals():
+            checkpoint_path = f"checkpoint_interrupted_epoch_{epoch if 'epoch' in locals() else 0}.pt"
+            torch.save({
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict() if 'optimizer' in locals() else None,
+                'epoch': epoch if 'epoch' in locals() else 0,
+                'best_val_loss': best_val_loss if 'best_val_loss' in locals() else float('inf')
+            }, checkpoint_path)
+            print(f"Model checkpoint saved to {checkpoint_path}")
+        raise
     except Exception as e:
         print(f"Training failed: {e}")
         raise
     finally:
-        # Always finish wandb run
-        wandb_manager.finish()
+        # Always finish wandb run, but handle potential errors during cleanup
+        try:
+            wandb_manager.finish()
+        except Exception as cleanup_error:
+            print(f"Warning: Error during wandb cleanup: {cleanup_error}")
 
 
 def main():
