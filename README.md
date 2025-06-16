@@ -6,9 +6,9 @@ A comprehensive AI-powered recommendation platform featuring multiple deep learn
 
 ## 📋 Overview
 
-CineSync v2 is a multi-model AI recommendation platform featuring four distinct deep learning approaches for movie and TV show recommendations. With access to 32M+ movie ratings and 12M+ anime reviews, the platform provides comprehensive training grounds for advanced recommendation systems.
+CineSync v2 is a multi-model AI recommendation platform featuring six distinct deep learning approaches for movie and TV show recommendations. With access to 32M+ movie ratings and 12M+ anime reviews, the platform provides comprehensive training grounds for advanced recommendation systems.
 
-**🎯 Four RTX 4090-Optimized Model Implementations:**
+**🎯 Six RTX 4090-Optimized Model Implementations:**
 
 ### 🏗️ **Enhanced Two-Tower Model** (`/advanced_models`)
 - **Architecture**: Ultimate Two-Tower with cross-attention and multi-task learning
@@ -37,6 +37,20 @@ CineSync v2 is a multi-model AI recommendation platform featuring four distinct 
 - **Parameters**: 4.7M parameters optimized for TV content
 - **Features**: TV-specific features, genre attention, status modeling
 - **Best For**: TV show recommendations with episodic content understanding
+
+### 🏗️ **Two-Tower Model** (`/two_tower_model`)
+- **Architecture**: Efficient dual-encoder for large-scale retrieval
+- **Memory Usage**: ~0.07 GB (0.3% of 24GB) - **✅ RTX 4090 VERIFIED**
+- **Parameters**: 178K parameters for scalable deployment
+- **Features**: Separate user/item towers, temperature scaling, L2 normalization
+- **Best For**: Large-scale production systems with millions of users
+
+### 🎯 **Original Hybrid Recommender** (`/lupe(python)/models`)
+- **Architecture**: Core hybrid collaborative + content-based filtering
+- **Memory Usage**: ~0.12 GB (0.5% of 24GB) - **✅ RTX 4090 VERIFIED**
+- **Parameters**: 3.9M parameters for robust recommendations
+- **Features**: User/item embeddings, neural network fusion, rating prediction
+- **Best For**: Production-ready recommendations with proven architecture
 
 The platform provides:
 - **Multiple Model Comparison**: Test different approaches on same datasets
