@@ -1,0 +1,147 @@
+# Advanced Models Requirements for CineSync v2
+# Updated dependencies for BERT4Rec, Sentence-BERT, GraphSAGE, and T5 models
+
+# Core PyTorch and Deep Learning
+torch>=2.1.0
+torchvision>=0.16.0
+torchaudio>=2.1.0
+torch-geometric>=2.4.0
+torch-sparse>=0.6.18
+torch-scatter>=2.1.2
+torch-cluster>=1.6.3
+
+# Transformers and NLP Models
+transformers>=4.35.0
+sentence-transformers>=2.2.2
+tokenizers>=0.14.0
+huggingface-hub>=0.17.0
+datasets>=2.14.0
+
+# Core Data Science
+numpy>=1.24.0
+pandas>=2.0.0
+scipy>=1.11.0
+scikit-learn>=1.3.0
+
+# GPU Acceleration and Performance
+accelerate>=0.24.0
+bitsandbytes>=0.41.0  # For 8-bit optimization
+optimum>=1.14.0  # Model optimization
+
+# Graph Processing
+networkx>=3.1
+igraph>=0.10.8
+dgl>=1.1.3  # Deep Graph Library (optional)
+
+# Efficient Computing
+numba>=0.58.0
+faiss-cpu>=1.7.4  # CPU version
+# faiss-gpu>=1.7.4  # GPU version (uncomment if using GPU)
+
+# Visualization and Monitoring
+matplotlib>=3.7.0
+seaborn>=0.12.0
+plotly>=5.17.0
+wandb>=0.15.0
+tensorboard>=2.14.0
+
+# Progress and Utilities
+tqdm>=4.66.0
+rich>=13.6.0  # Better terminal output
+omegaconf>=2.3.0  # Configuration management
+
+# Text Processing
+nltk>=3.8.1
+spacy>=3.7.0
+regex>=2023.8.8
+
+# Development and Testing
+jupyter>=1.0.0
+notebook>=7.0.0
+ipywidgets>=8.1.0
+pytest>=7.4.0
+black>=23.9.0  # Code formatting
+isort>=5.12.0  # Import sorting
+
+# Data Storage and I/O
+h5py>=3.9.0
+pyarrow>=13.0.0  # Fast columnar data
+zarr>=2.16.0  # Chunked arrays
+lmdb>=1.4.1  # Lightning Memory-Mapped Database
+
+# Advanced Features
+optuna>=3.4.0  # Hyperparameter optimization
+ray[tune]>=2.7.0  # Distributed hyperparameter tuning
+joblib>=1.3.0  # Parallel processing
+
+# Memory and Performance Profiling
+memory-profiler>=0.61.0
+psutil>=5.9.0
+py-spy>=0.3.14  # CPU profiler
+
+# API and Web Integration
+fastapi>=0.104.0
+uvicorn>=0.24.0
+requests>=2.31.0
+aiohttp>=3.8.0
+
+# Configuration and Environment
+python-dotenv>=1.0.0
+pyyaml>=6.0.1
+toml>=0.10.2
+
+# Specialized Libraries for Advanced Models
+einops>=0.7.0  # Tensor operations
+timm>=0.9.7  # Image models (if using vision features)
+torchmetrics>=1.2.0  # Metrics for PyTorch
+
+# BERT4Rec specific
+# (Uses transformers - already included)
+
+# Sentence-BERT specific
+sentence-transformers>=2.2.2  # Already included
+
+# GraphSAGE specific
+torch-geometric>=2.4.0  # Already included
+pytorch-lightning>=2.1.0  # For training infrastructure
+
+# T5 specific
+# (Uses transformers - already included)
+sacrebleu>=2.3.1  # For text generation evaluation
+rouge-score>=0.1.2  # For summarization evaluation
+
+# Optional: For distributed training
+deepspeed>=0.11.0  # Microsoft DeepSpeed
+fairscale>=0.4.13  # Facebook's model parallelism
+
+# Optional: For model compression
+torch-pruning>=1.2.9
+neural-compressor>=2.3.1
+
+# Optional: For ONNX export and optimization
+onnx>=1.15.0
+onnxruntime>=1.16.0
+onnxruntime-gpu>=1.16.0  # GPU version
+
+# Optional: Advanced visualization
+umap-learn>=0.5.4  # Dimensionality reduction for embeddings
+bokeh>=3.3.0  # Interactive visualizations
+
+# Data Version Control (optional)
+dvc>=3.26.0
+dvc[s3]>=3.26.0  # S3 backend support
+
+# Production Deployment (optional)
+triton-client>=2.38.0  # NVIDIA Triton Inference Server
+bentoml>=1.1.0  # Model serving framework
+
+# Development Quality Tools
+pre-commit>=3.5.0
+mypy>=1.6.0  # Type checking
+flake8>=6.1.0  # Linting
+bandit>=1.7.5  # Security linting
+
+# Documentation (optional)
+sphinx>=7.2.0
+sphinx-rtd-theme>=1.3.0
+myst-parser>=2.0.0  # Markdown support for Sphinx
