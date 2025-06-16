@@ -135,14 +135,33 @@ class WandbManager:
             self.logger.warning(f"Failed to log system info: {e}")
     
     def log_metrics(self, metrics: Dict[str, Any], step: Optional[int] = None, commit: bool = True):
-        """Log metrics to wandb"""
+        """Log metrics to wandb with step monotonicity handling"""
         if not self.is_initialized:
             return
             
         try:
-            wandb.log(metrics, step=step, commit=commit)
+            # Check for step monotonicity issues
+            if step is not None and hasattr(wandb.run, 'step') and wandb.run.step is not None:
+                current_wandb_step = wandb.run.step
+                if step <= current_wandb_step:
+                    # If provided step is not greater than current, use automatic stepping
+                    self.logger.warning(f"Step {step} <= current wandb step {current_wandb_step}. Using automatic stepping.")
+                    wandb.log(metrics, commit=commit)  # Let wandb auto-increment
+                    return
+            
+            # Log with provided step or auto-increment
+            if step is not None:
+                wandb.log(metrics, step=step, commit=commit)
+            else:
+                wandb.log(metrics, commit=commit)  # Auto-increment
+                
         except Exception as e:
             self.logger.error(f"Failed to log metrics: {e}")
+            # Fallback: try logging without step parameter
+            try:
+                wandb.log(metrics, commit=commit)
+            except Exception as fallback_e:
+                self.logger.error(f"Fallback logging also failed: {fallback_e}")
     
     def log_model_architecture(self, model: torch.nn.Module, model_name: str = "model"):
         """Log model architecture and parameters"""

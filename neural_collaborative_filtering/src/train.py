@@ -252,10 +252,9 @@ def main():
         
         # Log to wandb if enabled
         if args.use_wandb:
-            # Use explicit steps to avoid conflicts
-            final_step = wandb.run.step if wandb.run and hasattr(wandb.run, 'step') else 0
-            wandb.log(all_metrics, step=final_step)
-            wandb.log({"training_history": history}, step=final_step + 1)
+            # Use automatic stepping to avoid step conflicts
+            wandb.log(all_metrics)
+            wandb.log({"training_history": history})
         
         # Save all artifacts needed for model deployment
         save_path = Path(args.save_dir)
