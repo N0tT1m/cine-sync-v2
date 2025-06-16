@@ -343,7 +343,6 @@ def train_hybrid_with_wandb(args):
     
     # Enable detailed system monitoring
     import wandb
-    wandb.watch(None, log_freq=100)  # Will be set after model creation
     
     # Add custom metrics for bottleneck detection
     wandb.define_metric("performance/data_loading_time")
