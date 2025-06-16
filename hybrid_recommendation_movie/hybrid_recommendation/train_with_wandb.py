@@ -24,7 +24,7 @@ from datetime import datetime
 from pathlib import Path
 
 # Add project root to path
-sys.path.append(str(Path(__file__).parent.parent))
+sys.path.append(str(Path(__file__).parent.parent.parent))
 
 # Import wandb utilities
 from wandb_config import init_wandb_for_training, WandbManager
