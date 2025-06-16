@@ -605,7 +605,9 @@ def train_hybrid_with_wandb(args):
             'model_size_mb': sum(p.numel() * p.element_size() for p in model.parameters()) / (1024**2)
         }
         
-        wandb_manager.log_metrics({f'final/{k}': v for k, v in final_metrics.items()})
+        # Use training logger's current step for final metrics to maintain consistency
+        wandb_manager.log_metrics({f'final/{k}': v for k, v in final_metrics.items()}, 
+                                step=training_logger.get_current_step())
         
         return model, final_metrics
         
