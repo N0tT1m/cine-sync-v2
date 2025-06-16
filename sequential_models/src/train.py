@@ -59,7 +59,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Train Sequential Recommendation models')
     
     # Data preprocessing arguments
-    parser.add_argument('--ratings-path', type=str, default='../../ml-32m/ratings.csv',
+    parser.add_argument('--ratings-path', type=str, default='../../movies/cinesync/ml-32m/ratings.csv',
                        help='Path to ratings CSV file (userId, movieId, rating, timestamp)')
     parser.add_argument('--min-interactions', type=int, default=20,
                        help='Minimum interactions per user (filter cold users)')

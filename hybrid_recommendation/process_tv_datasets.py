@@ -27,12 +27,12 @@ class TVDatasetProcessor:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         
         # Dataset paths - updated for actual file structure
-        self.tmdb_path = self.data_dir / "tmdb-tv" / "TMDB_tv_dataset_v3.csv"
-        self.mal_animes_path = self.data_dir / "anime-dataset" / "animes.csv"
-        self.mal_profiles_path = self.data_dir / "anime-dataset" / "profiles.csv"
-        self.mal_reviews_path = self.data_dir / "anime-dataset" / "reviews.csv"
-        self.netflix_path = self.data_dir / "netflix-movies-and-tv" / "netflix_titles.csv"
-        self.imdb_dir = self.data_dir / "imdb-tv"
+        self.tmdb_path = self.data_dir / "tmdb" / "TMDB_tv_dataset_v3.csv"
+        self.mal_animes_path = self.data_dir / "anime" / "animes.csv"
+        self.mal_profiles_path = self.data_dir / "anime" / "profiles.csv"
+        self.mal_reviews_path = self.data_dir / "anime" / "reviews.csv"
+        self.netflix_path = self.data_dir / "netflix" / "netflix_titles.csv"
+        self.imdb_dir = self.data_dir / "imdb"
         
         # Output paths
         self.processed_dir = self.data_dir / "processed"

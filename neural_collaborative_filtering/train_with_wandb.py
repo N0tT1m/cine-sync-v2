@@ -140,7 +140,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Train NCF with Wandb')
     
     # Data arguments
-    parser.add_argument('--ratings-path', type=str, default='../ml-32m/ratings.csv',
+    parser.add_argument('--ratings-path', type=str, default='../movies/cinesync/ml-32m/ratings.csv',
                        help='Path to ratings CSV file')
     parser.add_argument('--min-ratings-user', type=int, default=20,
                        help='Minimum ratings per user')
