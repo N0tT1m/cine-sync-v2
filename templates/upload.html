@@ -1,0 +1,377 @@
+{% extends "base.html" %}
+
+{% block title %}Upload Models - CineSync v2 Admin{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2">Upload Models</h1>
+    <div class="btn-toolbar mb-2 mb-md-0">
+        <div class="btn-group me-2">
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="location.reload()">
+                <i class="bi bi-arrow-clockwise"></i> Refresh
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Upload Instructions -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="alert alert-info">
+            <h5 class="alert-heading"><i class="bi bi-info-circle"></i> Drop-in Model Integration</h5>
+            <p class="mb-0">
+                Upload your trained model files (.pt, .pkl, .joblib) and they'll be automatically integrated into the system. 
+                Supported model types: BERT4Rec, Sentence-BERT Two-Tower, GraphSAGE, T5 Hybrid, Enhanced Two-Tower, and Variational AutoEncoder.
+            </p>
+        </div>
+    </div>
+</div>
+
+<!-- Upload Form -->
+<div class="row mb-4">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Upload New Model</h5>
+            </div>
+            <div class="card-body">
+                <form id="uploadForm" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label for="modelFile" class="form-label">Model File</label>
+                        <input type="file" class="form-control" id="modelFile" name="model_file" 
+                               accept=".pt,.pkl,.joblib,.pth,.h5" required>
+                        <div class="form-text">
+                            Supported formats: .pt (PyTorch), .pkl (Pickle), .joblib, .pth, .h5 (Keras/TensorFlow)
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="modelName" class="form-label">Model Name</label>
+                        <input type="text" class="form-control" id="modelName" name="model_name" 
+                               placeholder="e.g., bert4rec_v2" required>
+                        <div class="form-text">
+                            A unique name for your model (used for identification)
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="modelType" class="form-label">Model Type</label>
+                        <select class="form-select" id="modelType" name="model_type" required>
+                            <option value="">Select model type...</option>
+                            <option value="bert4rec">BERT4Rec - Sequential recommendation with transformers</option>
+                            <option value="sentence_bert_two_tower">Sentence-BERT Two-Tower - Content-aware recommendations</option>
+                            <option value="graphsage">GraphSAGE - Graph neural network recommender</option>
+                            <option value="t5_hybrid">T5 Hybrid - Text-to-text transformer hybrid</option>
+                            <option value="enhanced_two_tower">Enhanced Two-Tower - Improved collaborative filtering</option>
+                            <option value="variational_autoencoder">Variational AutoEncoder - Latent space recommendations</option>
+                        </select>
+                        <div class="form-text">
+                            Select the type that matches your model architecture
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="modelDescription" class="form-label">Description (Optional)</label>
+                        <textarea class="form-control" id="modelDescription" name="model_description" 
+                                  rows="3" placeholder="Brief description of the model, training data, performance, etc."></textarea>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="enableImmediately" checked>
+                            <label class="form-check-label" for="enableImmediately">
+                                Enable immediately after upload
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary" id="uploadButton">
+                        <span class="loading-spinner spinner-border spinner-border-sm me-2" style="display: none;"></span>
+                        <span class="button-text">
+                            <i class="bi bi-upload me-1"></i> Upload Model
+                        </span>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Model Types Guide</h5>
+            </div>
+            <div class="card-body">
+                <div class="accordion" id="modelTypesAccordion">
+                    <div class="accordion-item">
+                        <h2 class="accordion-header" id="bert4recHeading">
+                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" 
+                                    data-bs-target="#bert4recCollapse">
+                                BERT4Rec
+                            </button>
+                        </h2>
+                        <div id="bert4recCollapse" class="accordion-collapse collapse" 
+                             data-bs-parent="#modelTypesAccordion">
+                            <div class="accordion-body small">
+                                <strong>Best for:</strong> Sequential patterns, user behavior modeling<br>
+                                <strong>Input:</strong> User interaction sequences<br>
+                                <strong>Output:</strong> Next-item recommendations
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="accordion-item">
+                        <h2 class="accordion-header" id="twotowerHeading">
+                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" 
+                                    data-bs-target="#twotowerCollapse">
+                                Sentence-BERT Two-Tower
+                            </button>
+                        </h2>
+                        <div id="twotowerCollapse" class="accordion-collapse collapse" 
+                             data-bs-parent="#modelTypesAccordion">
+                            <div class="accordion-body small">
+                                <strong>Best for:</strong> Content understanding, semantic similarity<br>
+                                <strong>Input:</strong> User/item features + text descriptions<br>
+                                <strong>Output:</strong> Content-aware recommendations
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="accordion-item">
+                        <h2 class="accordion-header" id="graphsageHeading">
+                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" 
+                                    data-bs-target="#graphsageCollapse">
+                                GraphSAGE
+                            </button>
+                        </h2>
+                        <div id="graphsageCollapse" class="accordion-collapse collapse" 
+                             data-bs-parent="#modelTypesAccordion">
+                            <div class="accordion-body small">
+                                <strong>Best for:</strong> Cold-start problems, graph relationships<br>
+                                <strong>Input:</strong> User-item interaction graph<br>
+                                <strong>Output:</strong> Graph-aware recommendations
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="accordion-item">
+                        <h2 class="accordion-header" id="t5Heading">
+                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" 
+                                    data-bs-target="#t5Collapse">
+                                T5 Hybrid
+                            </button>
+                        </h2>
+                        <div id="t5Collapse" class="accordion-collapse collapse" 
+                             data-bs-parent="#modelTypesAccordion">
+                            <div class="accordion-body small">
+                                <strong>Best for:</strong> Rich text content, explanations<br>
+                                <strong>Input:</strong> Natural language descriptions<br>
+                                <strong>Output:</strong> Text-aware recommendations + explanations
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card mt-3">
+            <div class="card-header">
+                <h5 class="mb-0">Upload Requirements</h5>
+            </div>
+            <div class="card-body">
+                <ul class="list-unstyled small">
+                    <li><i class="bi bi-check-circle text-success me-2"></i>Max file size: 500MB</li>
+                    <li><i class="bi bi-check-circle text-success me-2"></i>PyTorch models (.pt, .pth)</li>
+                    <li><i class="bi bi-check-circle text-success me-2"></i>Scikit-learn models (.pkl, .joblib)</li>
+                    <li><i class="bi bi-check-circle text-success me-2"></i>Keras/TensorFlow models (.h5)</li>
+                    <li><i class="bi bi-exclamation-triangle text-warning me-2"></i>Models must be compatible with existing interfaces</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Upload Progress -->
+<div id="uploadProgress" class="row mb-4" style="display: none;">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <h6>Upload Progress</h6>
+                <div class="progress mb-2">
+                    <div id="progressBar" class="progress-bar" role="progressbar" style="width: 0%"></div>
+                </div>
+                <div id="progressText" class="small text-muted">Preparing upload...</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Uploads -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Recent Uploads</h5>
+            </div>
+            <div class="card-body">
+                <div id="recentUploads">
+                    <div class="text-center py-4">
+                        <i class="bi bi-cloud-upload fs-1 text-muted"></i>
+                        <p class="text-muted mt-2">No recent uploads</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.getElementById('uploadForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        const formData = new FormData(this);
+        const uploadButton = document.getElementById('uploadButton');
+        const progressContainer = document.getElementById('uploadProgress');
+        const progressBar = document.getElementById('progressBar');
+        const progressText = document.getElementById('progressText');
+        
+        // Show progress
+        progressContainer.style.display = 'block';
+        showLoading(uploadButton);
+        
+        try {
+            // Simulate progress for file upload
+            let progress = 0;
+            const progressInterval = setInterval(() => {
+                progress += Math.random() * 20;
+                if (progress > 90) progress = 90;
+                
+                progressBar.style.width = progress + '%';
+                progressText.textContent = `Uploading... ${Math.round(progress)}%`;
+            }, 200);
+            
+            const response = await fetch('/api/upload_model', {
+                method: 'POST',
+                body: formData
+            });
+            
+            clearInterval(progressInterval);
+            progressBar.style.width = '100%';
+            progressText.textContent = 'Processing uploaded model...';
+            
+            const result = await response.json();
+            
+            if (response.ok) {
+                showAlert(result.message, 'success');
+                
+                // Reset form
+                document.getElementById('uploadForm').reset();
+                
+                // Add to recent uploads
+                addToRecentUploads({
+                    name: formData.get('model_name'),
+                    type: formData.get('model_type'),
+                    timestamp: new Date().toISOString(),
+                    status: 'success'
+                });
+                
+                // Hide progress after delay
+                setTimeout(() => {
+                    progressContainer.style.display = 'none';
+                    progressBar.style.width = '0%';
+                }, 2000);
+                
+            } else {
+                throw new Error(result.error || 'Upload failed');
+            }
+            
+        } catch (error) {
+            showAlert(`Upload failed: ${error.message}`, 'danger');
+            progressText.textContent = 'Upload failed';
+            progressBar.classList.add('bg-danger');
+        } finally {
+            hideLoading(uploadButton);
+        }
+    });
+    
+    function addToRecentUploads(upload) {
+        const container = document.getElementById('recentUploads');
+        
+        // Clear empty state
+        if (container.querySelector('.text-center')) {
+            container.innerHTML = '';
+        }
+        
+        const uploadElement = document.createElement('div');
+        uploadElement.className = 'border-bottom pb-2 mb-2';
+        uploadElement.innerHTML = `
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <strong>${upload.name}</strong>
+                    <span class="badge bg-info ms-2">${upload.type}</span>
+                    ${upload.status === 'success' ? '<span class="badge bg-success ms-1">Success</span>' : '<span class="badge bg-danger ms-1">Failed</span>'}
+                </div>
+                <small class="text-muted">${new Date(upload.timestamp).toLocaleString()}</small>
+            </div>
+        `;
+        
+        container.insertBefore(uploadElement, container.firstChild);
+        
+        // Keep only last 5 uploads
+        const uploads = container.querySelectorAll('.border-bottom');
+        if (uploads.length > 5) {
+            uploads[uploads.length - 1].remove();
+        }
+    }
+    
+    // File validation
+    document.getElementById('modelFile').addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        
+        if (file) {
+            const maxSize = 500 * 1024 * 1024; // 500MB
+            const allowedExtensions = ['.pt', '.pkl', '.joblib', '.pth', '.h5'];
+            
+            if (file.size > maxSize) {
+                showAlert('File size must be less than 500MB', 'warning');
+                this.value = '';
+                return;
+            }
+            
+            const extension = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
+            if (!allowedExtensions.includes(extension)) {
+                showAlert('Invalid file type. Please upload .pt, .pkl, .joblib, .pth, or .h5 files', 'warning');
+                this.value = '';
+                return;
+            }
+            
+            // Auto-fill model name from filename
+            const modelNameInput = document.getElementById('modelName');
+            if (!modelNameInput.value) {
+                const baseName = file.name.substring(0, file.name.lastIndexOf('.'));
+                modelNameInput.value = baseName.replace(/[^a-zA-Z0-9_-]/g, '_');
+            }
+        }
+    });
+    
+    // Model type change handler
+    document.getElementById('modelType').addEventListener('change', function(e) {
+        const type = e.target.value;
+        
+        // Update description placeholder based on type
+        const descriptions = {
+            'bert4rec': 'Sequential recommendation model trained on user interaction sequences...',
+            'sentence_bert_two_tower': 'Content-aware model using Sentence-BERT for semantic understanding...',
+            'graphsage': 'Graph neural network trained on user-item interaction graphs...',
+            't5_hybrid': 'Hybrid model using T5 for text understanding and recommendation...',
+            'enhanced_two_tower': 'Improved collaborative filtering with enhanced features...',
+            'variational_autoencoder': 'VAE model for latent space recommendations...'
+        };
+        
+        const descriptionField = document.getElementById('modelDescription');
+        descriptionField.placeholder = descriptions[type] || 'Brief description of the model...';
+    });
+</script>
+{% endblock %}

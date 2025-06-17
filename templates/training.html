@@ -1,0 +1,379 @@
+{% extends "base.html" %}
+
+{% block title %}Training Management - CineSync v2 Admin{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2">Training Management</h1>
+    <div class="btn-toolbar mb-2 mb-md-0">
+        <div class="btn-group me-2">
+            <button type="button" class="btn btn-sm btn-primary" onclick="savePreferences(this)">
+                <span class="loading-spinner spinner-border spinner-border-sm me-1"></span>
+                <span class="button-text">
+                    <i class="bi bi-save"></i> Save Changes
+                </span>
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Training Preferences -->
+<div class="row mb-4">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Training Preferences</h5>
+            </div>
+            <div class="card-body">
+                <form id="trainingPreferencesForm">
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="autoRetrain" 
+                                       {% if preferences.auto_retrain %}checked{% endif %}>
+                                <label class="form-check-label" for="autoRetrain">
+                                    Auto-retrain models
+                                </label>
+                            </div>
+                            <small class="text-muted">Automatically retrain models when enough feedback is collected</small>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <label for="feedbackThreshold" class="form-label">Min Feedback Threshold</label>
+                            <input type="number" class="form-control" id="feedbackThreshold" 
+                                   value="{{ preferences.min_feedback_threshold }}" min="10" max="10000">
+                            <small class="text-muted">Minimum feedback samples before retraining</small>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="qualityFilters" class="form-label">Quality Filters</label>
+                        <div class="row">
+                            {% for quality in ['4K', '2K', '1080p', '720p', '480p', '240p'] %}
+                            <div class="col-md-2">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" 
+                                           id="quality_{{ quality }}" value="{{ quality }}"
+                                           {% if quality in preferences.quality_filters %}checked{% endif %}>
+                                    <label class="form-check-label" for="quality_{{ quality }}">
+                                        {{ quality }}
+                                    </label>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        <small class="text-muted">Only include downloads of selected qualities in training</small>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Training Overview</h5>
+            </div>
+            <div class="card-body">
+                {% if training_overview.content_type_distribution %}
+                <div class="mb-3">
+                    <h6>Content Type Distribution</h6>
+                    {% for content_type, count in training_overview.content_type_distribution.items() %}
+                    <div class="d-flex justify-content-between">
+                        <span class="text-capitalize">{{ content_type }}:</span>
+                        <span class="fw-bold">{{ count }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+                
+                {% if training_overview.rating_distribution %}
+                <div class="mb-3">
+                    <h6>Rating Distribution</h6>
+                    {% for rating, count in training_overview.rating_distribution.items() %}
+                    <div class="d-flex justify-content-between">
+                        <span>{{ rating }} stars:</span>
+                        <span class="fw-bold">{{ count }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+                
+                <div class="d-grid">
+                    <button type="button" class="btn btn-warning" onclick="triggerRetraining(this)">
+                        <span class="loading-spinner spinner-border spinner-border-sm me-2"></span>
+                        <span class="button-text">
+                            <i class="bi bi-gear me-1"></i> Manual Retrain
+                        </span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Genre Filtering -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Genre Filtering</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted mb-3">Select genres to exclude from training data</p>
+                
+                <div class="row">
+                    {% for genre in available_genres %}
+                    <div class="col-md-3 col-lg-2 mb-2">
+                        <div class="form-check">
+                            <input class="form-check-input genre-filter" type="checkbox" 
+                                   id="genre_{{ genre }}" value="{{ genre }}"
+                                   {% if genre in preferences.excluded_genres %}checked{% endif %}>
+                            <label class="form-check-label" for="genre_{{ genre }}">
+                                {{ genre }}
+                            </label>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                
+                <div class="mt-3">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="selectAllGenres()">
+                        Select All
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="clearGenreSelection()">
+                        Clear All
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- User Management -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">User Management</h5>
+                <div class="input-group" style="width: 300px;">
+                    <input type="number" class="form-control form-control-sm" 
+                           id="userSearchInput" placeholder="Search by User ID">
+                    <button class="btn btn-outline-secondary btn-sm" type="button" onclick="searchUsers()">
+                        <i class="bi bi-search"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                {% if user_stats %}
+                <div class="table-responsive">
+                    <table class="table table-sm" id="userTable">
+                        <thead>
+                            <tr>
+                                <th>User ID</th>
+                                <th>Feedback Count</th>
+                                <th>Avg Rating</th>
+                                <th>Last Activity</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for user in user_stats[:50] %}
+                            <tr data-user-id="{{ user.user_id }}">
+                                <td>{{ user.user_id }}</td>
+                                <td>{{ user.feedback_count }}</td>
+                                <td>{{ "%.2f" | format(user.avg_rating) }}</td>
+                                <td class="small">{{ user.last_activity }}</td>
+                                <td>
+                                    {% if user.excluded %}
+                                        <span class="badge bg-danger">Excluded</span>
+                                    {% else %}
+                                        <span class="badge bg-success">Included</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if user.excluded %}
+                                        <button class="btn btn-success btn-sm" 
+                                                onclick="includeUser({{ user.user_id }}, this)">
+                                            <span class="loading-spinner spinner-border spinner-border-sm me-1"></span>
+                                            <span class="button-text">Include</span>
+                                        </button>
+                                    {% else %}
+                                        <button class="btn btn-danger btn-sm" 
+                                                onclick="excludeUser({{ user.user_id }}, this)">
+                                            <span class="loading-spinner spinner-border spinner-border-sm me-1"></span>
+                                            <span class="button-text">Exclude</span>
+                                        </button>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                
+                {% if user_stats|length > 50 %}
+                <div class="text-center mt-3">
+                    <small class="text-muted">Showing first 50 users. Use search to find specific users.</small>
+                </div>
+                {% endif %}
+                
+                {% else %}
+                <div class="text-center py-4">
+                    <i class="bi bi-people fs-1 text-muted"></i>
+                    <p class="text-muted mt-2">No user data available yet</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    async function savePreferences(button) {
+        showLoading(button);
+        
+        try {
+            // Collect form data
+            const preferences = {
+                auto_retrain: document.getElementById('autoRetrain').checked,
+                min_feedback_threshold: parseInt(document.getElementById('feedbackThreshold').value),
+                quality_filters: Array.from(document.querySelectorAll('input[id^="quality_"]:checked'))
+                    .map(cb => cb.value),
+                excluded_genres: Array.from(document.querySelectorAll('.genre-filter:checked'))
+                    .map(cb => cb.value)
+            };
+            
+            const response = await makeRequest('/api/training/preferences', {
+                method: 'POST',
+                body: JSON.stringify(preferences)
+            });
+            
+            showAlert('Training preferences saved successfully', 'success');
+        } catch (error) {
+            showAlert(`Failed to save preferences: ${error.message}`, 'danger');
+        } finally {
+            hideLoading(button);
+        }
+    }
+    
+    async function excludeUser(userId, button) {
+        if (!confirm(`Are you sure you want to exclude user ${userId} from training?`)) {
+            return;
+        }
+        
+        showLoading(button);
+        
+        try {
+            const response = await makeRequest('/api/training/exclude_user', {
+                method: 'POST',
+                body: JSON.stringify({user_id: userId})
+            });
+            
+            // Update UI
+            const row = button.closest('tr');
+            const statusBadge = row.querySelector('.badge');
+            statusBadge.className = 'badge bg-danger';
+            statusBadge.textContent = 'Excluded';
+            
+            button.className = 'btn btn-success btn-sm';
+            button.onclick = () => includeUser(userId, button);
+            button.querySelector('.button-text').textContent = 'Include';
+            
+            showAlert(`User ${userId} excluded from training`, 'success');
+        } catch (error) {
+            showAlert(`Failed to exclude user: ${error.message}`, 'danger');
+        } finally {
+            hideLoading(button);
+        }
+    }
+    
+    async function includeUser(userId, button) {
+        showLoading(button);
+        
+        try {
+            const response = await makeRequest('/api/training/include_user', {
+                method: 'POST',
+                body: JSON.stringify({user_id: userId})
+            });
+            
+            // Update UI
+            const row = button.closest('tr');
+            const statusBadge = row.querySelector('.badge');
+            statusBadge.className = 'badge bg-success';
+            statusBadge.textContent = 'Included';
+            
+            button.className = 'btn btn-danger btn-sm';
+            button.onclick = () => excludeUser(userId, button);
+            button.querySelector('.button-text').textContent = 'Exclude';
+            
+            showAlert(`User ${userId} included in training`, 'success');
+        } catch (error) {
+            showAlert(`Failed to include user: ${error.message}`, 'danger');
+        } finally {
+            hideLoading(button);
+        }
+    }
+    
+    async function triggerRetraining(button) {
+        if (!confirm('Are you sure you want to trigger manual retraining? This may take a while.')) {
+            return;
+        }
+        
+        showLoading(button);
+        
+        try {
+            const response = await makeRequest('/api/training/trigger_retrain', {
+                method: 'POST'
+            });
+            
+            showAlert('Model retraining started successfully', 'success');
+        } catch (error) {
+            showAlert(`Failed to trigger retraining: ${error.message}`, 'danger');
+        } finally {
+            hideLoading(button);
+        }
+    }
+    
+    function selectAllGenres() {
+        document.querySelectorAll('.genre-filter').forEach(cb => {
+            cb.checked = true;
+        });
+    }
+    
+    function clearGenreSelection() {
+        document.querySelectorAll('.genre-filter').forEach(cb => {
+            cb.checked = false;
+        });
+    }
+    
+    function searchUsers() {
+        const searchValue = document.getElementById('userSearchInput').value.toLowerCase();
+        const rows = document.querySelectorAll('#userTable tbody tr');
+        
+        rows.forEach(row => {
+            const userId = row.dataset.userId;
+            const visible = userId.includes(searchValue) || searchValue === '';
+            row.style.display = visible ? '' : 'none';
+        });
+    }
+    
+    // Real-time search
+    document.getElementById('userSearchInput').addEventListener('input', searchUsers);
+    
+    // Auto-save preferences when changed
+    document.querySelectorAll('#trainingPreferencesForm input').forEach(input => {
+        input.addEventListener('change', () => {
+            // Show save button as highlighted
+            const saveBtn = document.querySelector('[onclick="savePreferences(this)"]');
+            if (saveBtn) {
+                saveBtn.classList.add('btn-warning');
+                saveBtn.classList.remove('btn-primary');
+            }
+        });
+    });
+</script>
+{% endblock %}
