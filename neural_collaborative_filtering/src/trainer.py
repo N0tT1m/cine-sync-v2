@@ -35,7 +35,7 @@ class NCFTrainer:
     """
     
     def __init__(self, model: nn.Module, device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
-                 learning_rate: float = 0.001, weight_decay: float = 1e-5):
+                 learning_rate: float = 0.001, weight_decay: float = 1e-5, checkpoint_dir: Optional[str] = None):
         """
         Initialize NCF trainer with model and training configuration.
         
@@ -44,11 +44,13 @@ class NCFTrainer:
             device: Device to train on ('cuda' or 'cpu')
             learning_rate: Learning rate for Adam optimizer
             weight_decay: L2 regularization weight for preventing overfitting
+            checkpoint_dir: Directory to auto-load checkpoints from
         """
         self.model = model.to(device)
         self.device = device
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
+        self.checkpoint_dir = checkpoint_dir
         
         # Initialize Adam optimizer with L2 regularization
         self.optimizer = optim.Adam(
@@ -71,6 +73,10 @@ class NCFTrainer:
         self.best_val_loss = float('inf')  # Best validation loss seen
         self.best_model_state = None       # Best model state dict
         self.patience_counter = 0          # Epochs without improvement
+        
+        # Auto-load most recent checkpoint if available
+        if checkpoint_dir:
+            self._auto_load_checkpoint(checkpoint_dir)
     
     def train_epoch(self, train_loader: DataLoader) -> float:
         """Train for one epoch
@@ -370,6 +376,29 @@ class NCFTrainer:
         
         self.logger.info(f"Loaded checkpoint from {filepath}")
         return checkpoint
+    
+    def _auto_load_checkpoint(self, checkpoint_dir: str):
+        """Auto-load the most recent checkpoint from directory"""
+        import glob
+        import os
+        
+        checkpoint_path = Path(checkpoint_dir)
+        if not checkpoint_path.exists():
+            return
+        
+        # Find all checkpoint files
+        checkpoint_files = list(checkpoint_path.glob("*.pt"))
+        if not checkpoint_files:
+            return
+        
+        # Get most recent checkpoint
+        latest_checkpoint = max(checkpoint_files, key=os.path.getmtime)
+        
+        try:
+            self.load_checkpoint(str(latest_checkpoint))
+            self.logger.info(f"Auto-loaded checkpoint: {latest_checkpoint}")
+        except Exception as e:
+            self.logger.warning(f"Failed to auto-load checkpoint {latest_checkpoint}: {e}")
 
 
 class NCFEvaluator:

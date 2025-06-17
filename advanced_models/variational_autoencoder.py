@@ -50,6 +50,67 @@ class VariationalEncoder(nn.Module):
         # Separate projections for mean and log-variance of latent distribution
         self.mu_layer = nn.Linear(prev_dim, latent_dim)      # Mean of q(z|x)
         self.logvar_layer = nn.Linear(prev_dim, latent_dim)  # Log-variance of q(z|x)
+    
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        \"\"\"Encode input to latent distribution parameters\"\"\"
+        h = self.encoder(x)
+        mu = self.mu_layer(h)
+        logvar = self.logvar_layer(h)
+        return mu, logvar
+
+
+class VAETrainer:
+    \"\"\"Trainer for VAE recommender with comprehensive checkpointing\"\"\"
+    
+    def __init__(self, model, device='cuda', learning_rate=0.001, weight_decay=1e-5, beta=1.0):
+        self.model = model.to(device)
+        self.device = device
+        self.beta = beta  # KL divergence weight
+        self.optimizer = torch.optim.Adam(
+            model.parameters(), 
+            lr=learning_rate, 
+            weight_decay=weight_decay
+        )
+        
+        # Training state
+        self.best_val_loss = float('inf')
+        self.training_history = []
+    
+    def save_checkpoint(self, filepath: str, epoch: int, metrics: Dict[str, float]):
+        \"\"\"Save comprehensive checkpoint with all training state\"\"\"
+        checkpoint = {
+            'epoch': epoch,
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'best_val_loss': self.best_val_loss,
+            'metrics': metrics,
+            'training_history': self.training_history,
+            'beta': self.beta,
+            'model_config': {
+                'model_class': self.model.__class__.__name__,
+                'input_dim': getattr(self.model, 'input_dim', None),
+                'latent_dim': getattr(self.model, 'latent_dim', None),
+                'hidden_dims': getattr(self.model, 'hidden_dims', None),
+            }
+        }
+        
+        torch.save(checkpoint, filepath)
+        print(f\"Saved VAE checkpoint to {filepath}\")
+    
+    def load_checkpoint(self, filepath: str) -> Dict:
+        \"\"\"Load checkpoint and restore training state\"\"\"
+        checkpoint = torch.load(filepath, map_location=self.device)
+        
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        self.best_val_loss = checkpoint['best_val_loss']
+        self.training_history = checkpoint.get('training_history', [])
+        self.beta = checkpoint.get('beta', 1.0)
+        
+        print(f\"Loaded VAE checkpoint from {filepath}\")
+        return checkpoint
+        self.mu_layer = nn.Linear(prev_dim, latent_dim)      # Mean of q(z|x)
+        self.logvar_layer = nn.Linear(prev_dim, latent_dim)  # Log-variance of q(z|x)
         
         self._init_weights()
     

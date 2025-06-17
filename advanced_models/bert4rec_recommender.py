@@ -431,11 +431,13 @@ class BERT4RecTrainer:
         learning_rate: float = 5e-5,
         weight_decay: float = 0.01,
         warmup_steps: int = 1000,
-        use_amp: bool = True
+        use_amp: bool = True,
+        checkpoint_dir: Optional[str] = None
     ):
         self.model = model.to(device)
         self.device = device
         self.use_amp = use_amp
+        self.checkpoint_dir = checkpoint_dir
         
         # Optimizer
         self.optimizer = torch.optim.AdamW(
@@ -459,6 +461,10 @@ class BERT4RecTrainer:
         
         # Loss function
         self.criterion = nn.CrossEntropyLoss(ignore_index=0)
+        
+        # Auto-load most recent checkpoint if available
+        if checkpoint_dir:
+            self._auto_load_checkpoint(checkpoint_dir)
     
     def train_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, float]:
         """Training step with masked language modeling"""
@@ -501,3 +507,65 @@ class BERT4RecTrainer:
             'loss': loss.item(),
             'lr': self.optimizer.param_groups[0]['lr']
         }
+    
+    def save_checkpoint(self, filepath: str, epoch: int, metrics: Dict[str, float]):
+        """Save comprehensive checkpoint with all training state"""
+        checkpoint = {
+            'epoch': epoch,
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'scheduler_state_dict': self.scheduler.state_dict(),
+            'metrics': metrics,
+            'model_config': {
+                'model_class': self.model.__class__.__name__,
+                'num_items': getattr(self.model, 'num_items', None),
+                'max_seq_len': getattr(self.model, 'max_seq_len', None),
+                'd_model': getattr(self.model, 'd_model', None),
+                'num_heads': getattr(self.model, 'num_heads', None),
+                'num_layers': getattr(self.model, 'num_layers', None),
+            }
+        }
+        
+        if self.use_amp:
+            checkpoint['scaler_state_dict'] = self.scaler.state_dict()
+        
+        torch.save(checkpoint, filepath)
+        print(f"Saved checkpoint to {filepath}")
+    
+    def load_checkpoint(self, filepath: str) -> Dict:
+        """Load checkpoint and restore training state"""
+        checkpoint = torch.load(filepath, map_location=self.device)
+        
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        
+        if self.use_amp and 'scaler_state_dict' in checkpoint:
+            self.scaler.load_state_dict(checkpoint['scaler_state_dict'])
+        
+        print(f"Loaded checkpoint from {filepath}")
+        return checkpoint
+    
+    def _auto_load_checkpoint(self, checkpoint_dir: str):
+        """Auto-load the most recent checkpoint from directory"""
+        import glob
+        import os
+        from pathlib import Path
+        
+        checkpoint_path = Path(checkpoint_dir)
+        if not checkpoint_path.exists():
+            return
+        
+        # Find all checkpoint files
+        checkpoint_files = list(checkpoint_path.glob("*.pt"))
+        if not checkpoint_files:
+            return
+        
+        # Get most recent checkpoint
+        latest_checkpoint = max(checkpoint_files, key=os.path.getmtime)
+        
+        try:
+            self.load_checkpoint(str(latest_checkpoint))
+            print(f"Auto-loaded BERT4Rec checkpoint: {latest_checkpoint}")
+        except Exception as e:
+            print(f"Failed to auto-load checkpoint {latest_checkpoint}: {e}")
