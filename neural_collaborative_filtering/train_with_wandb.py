@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 from datetime import datetime
 import time
+import math
 
 # Add project root to path
 sys.path.append(str(Path(__file__).parent.parent))
@@ -425,11 +426,16 @@ def train_ncf_with_wandb(args):
         scaler = None
         if device.type == 'cuda':
             try:
-                from torch.cuda.amp import GradScaler
-                scaler = GradScaler()
+                from torch.amp import GradScaler
+                scaler = GradScaler('cuda')
                 logger.info("Mixed precision training enabled")
             except ImportError:
-                logger.warning("Mixed precision not available")
+                try:
+                    from torch.cuda.amp import GradScaler
+                    scaler = GradScaler()
+                    logger.info("Mixed precision training enabled (legacy API)")
+                except ImportError:
+                    logger.warning("Mixed precision not available")
         
         # Log training configuration
         training_config = {
