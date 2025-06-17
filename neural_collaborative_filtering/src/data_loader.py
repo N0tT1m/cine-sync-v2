@@ -172,9 +172,9 @@ class NCFDataLoader:
         self.logger.info(f"Filtered ratings: {original_size} -> {filtered_size} "
                         f"({filtered_size/original_size:.2%} retained)")
         
-        # Normalize ratings to 0-1 scale for training stability
+        # Normalize ratings to 0-1 scale for training stability (in-place for memory efficiency)
         # Converts 0.5-5.0 scale to 0.0-1.0 scale
-        self.ratings_df['rating'] = (self.ratings_df['rating'] - 0.5) / 4.5
+        self.ratings_df.loc[:, 'rating'] = (self.ratings_df['rating'] - 0.5) / 4.5
     
     def _fit_encoders(self):
         """Fit label encoders on filtered data
@@ -238,15 +238,21 @@ class NCFDataLoader:
             test_df, self.user_encoder, self.item_encoder, self.genre_encoder, self.movies_df
         )
         
-        # Create PyTorch data loaders with appropriate settings
+        # Create PyTorch data loaders with performance-optimized settings for RTX 4090
         train_loader = DataLoader(
-            train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers  # Shuffle for training
+            train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers,
+            pin_memory=True, persistent_workers=True if num_workers > 0 else False,
+            prefetch_factor=4 if num_workers > 0 else None, drop_last=True  # Consistent batch sizes
         )
         val_loader = DataLoader(
-            val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers   # No shuffle for evaluation
+            val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers,
+            pin_memory=True, persistent_workers=True if num_workers > 0 else False,
+            prefetch_factor=4 if num_workers > 0 else None, drop_last=False
         )
         test_loader = DataLoader(
-            test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers  # No shuffle for evaluation
+            test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers,
+            pin_memory=True, persistent_workers=True if num_workers > 0 else False,
+            prefetch_factor=4 if num_workers > 0 else None, drop_last=False
         )
         
         self.logger.info(f"Created data loaders: train={len(train_dataset)}, "

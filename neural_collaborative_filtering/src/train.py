@@ -31,6 +31,8 @@ from wandb_training_integration import WandbTrainingLogger
 from src.model import NeuralCollaborativeFiltering, SimpleNCF, DeepNCF
 from src.data_loader import NCFDataLoader
 from src.trainer import NCFTrainer, NCFEvaluator
+from memory_config import MemoryOptimizer, apply_memory_optimizations
+from performance_config import PerformanceOptimizer, apply_rtx4090_optimizations
 
 
 def setup_logging(log_level: str = "INFO"):
@@ -88,8 +90,8 @@ def parse_args():
     # Training hyperparameters
     parser.add_argument('--epochs', type=int, default=50,
                        help='Maximum number of training epochs')
-    parser.add_argument('--batch-size', type=int, default=8192,
-                       help='Training batch size (larger for stable gradients and GPU efficiency)')
+    parser.add_argument('--batch-size', type=int, default=16384,
+                       help='Training batch size (optimized for RTX 4090 24GB)')
     parser.add_argument('--learning-rate', type=float, default=0.001,
                        help='Learning rate for Adam optimizer')
     parser.add_argument('--weight-decay', type=float, default=1e-5,
@@ -101,8 +103,8 @@ def parse_args():
     parser.add_argument('--device', type=str, default='auto',
                        choices=['auto', 'cuda', 'cpu'],
                        help='Device to use for training')
-    parser.add_argument('--num-workers', type=int, default=16,
-                       help='Number of data loader workers (higher for better CPU utilization)')
+    parser.add_argument('--num-workers', type=int, default=24,
+                       help='Number of data loader workers (maximized for Ryzen 9 3900X 24 threads)')
     parser.add_argument('--save-dir', type=str, default='./models',
                        help='Directory to save trained models')
     
@@ -227,6 +229,22 @@ def main():
     
     logger.info(f"Using device: {device}")
     
+    # Apply MAXIMUM performance optimizations for RTX 4090 + Ryzen 9 3900X
+    apply_rtx4090_optimizations()
+    MemoryOptimizer.setup_performance_training(device)
+    
+    # Get RTX 4090 beast mode config
+    performance_config = PerformanceOptimizer.get_rtx4090_config()
+    
+    # Override batch size and num_workers if using defaults
+    if args.batch_size == 16384:  # Default value
+        args.batch_size = performance_config['batch_size']
+        logger.info(f"Using RTX 4090 optimized batch size: {args.batch_size}")
+    
+    if args.num_workers == 24:  # Default value  
+        args.num_workers = performance_config['num_workers']
+        logger.info(f"Using Ryzen 9 3900X optimized workers: {args.num_workers}")
+    
     try:
         # Load and preprocess MovieLens data for NCF training
         logger.info("Loading and preprocessing data...")
@@ -266,6 +284,16 @@ def main():
         
         model = model.to(device)
         
+        # Apply RTX 4090 model optimizations for maximum speed
+        model = PerformanceOptimizer.optimize_model_for_speed(model)
+        
+        # Find optimal batch size for RTX 4090
+        if device.type == 'cuda':
+            optimal_batch = PerformanceOptimizer.get_optimal_batch_size_rtx4090(model, device)
+            if optimal_batch > args.batch_size:
+                logger.info(f"🚀 Upgrading batch size from {args.batch_size} to {optimal_batch} for RTX 4090")
+                args.batch_size = optimal_batch
+        
         # GPU memory optimization
         if device.type == 'cuda':
             torch.backends.cudnn.benchmark = True  # Optimize CUDA kernels
@@ -278,8 +306,17 @@ def main():
             optimizer, mode='min', factor=0.5, patience=5
         )
         
-        # Mixed precision training for 2x speedup
+        # Mixed precision training for maximum speed
         scaler = torch.amp.GradScaler('cuda') if device.type == 'cuda' else None
+        
+        # Enable maximum performance settings for RTX 4090
+        if device.type == 'cuda':
+            torch.backends.cudnn.benchmark = True  # Optimize for speed
+            torch.backends.cudnn.enabled = True
+            torch.cuda.empty_cache()
+            # Use tensor cores and optimize memory access
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
         
         # Training logger
         training_logger = WandbTrainingLogger(wandb_manager, 'ncf_basic')
@@ -369,6 +406,10 @@ def main():
                     
                     if batch_idx % 500 == 0:
                         logger.info(f'Epoch {epoch}, Batch {batch_idx}/{len(train_loader)}, Loss: {loss.item():.4f}')
+                        
+                        # Reduced memory cleanup for RTX 4090 (24GB VRAM)
+                        if batch_idx % 5000 == 0:  # Less frequent cleanup
+                            MemoryOptimizer.cleanup_memory()
             
             train_loss = np.mean(train_losses)
             train_rmse = math.sqrt(train_loss)

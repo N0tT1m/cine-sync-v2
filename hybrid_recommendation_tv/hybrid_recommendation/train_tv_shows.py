@@ -23,6 +23,10 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+# Import RTX 4090 BEAST MODE optimizations
+sys.path.append(str(Path(__file__).parent.parent.parent / 'neural_collaborative_filtering'))
+from performance_config import PerformanceOptimizer, apply_rtx4090_optimizations
+
 # Import custom modules
 from config import load_config
 from models.tv_recommender import TVShowRecommenderModel, TVShowDataset, save_tv_model
@@ -41,17 +45,22 @@ def setup_logging():
     return logging.getLogger("tv-show-training")
 
 def setup_gpu():
-    """Set up GPU for training if available"""
+    """Set up GPU for training with RTX 4090 BEAST MODE"""
     if torch.cuda.is_available():
         device = torch.device('cuda')
         num_gpus = torch.cuda.device_count()
         logger.info(f"Found {num_gpus} CUDA-enabled GPU(s)")
         logger.info(f"Using GPU: {torch.cuda.get_device_name(0)}")
         
+        # 🔥🔥🔥 ACTIVATE RTX 4090 BEAST MODE 🔥🔥🔥
+        apply_rtx4090_optimizations()
+        PerformanceOptimizer.setup_maximum_performance()
+        
         # Clear GPU cache
         torch.cuda.empty_cache()
         gc.collect()
         
+        logger.info("🚀 RTX 4090 TV SHOW BEAST MODE ACTIVATED!")
         return device
     else:
         logger.info("CUDA not available, using CPU")
@@ -72,12 +81,12 @@ class TVShowTrainer:
         self.device = setup_gpu()
         self.scaler = GradScaler('cuda') if self.device.type == 'cuda' else None
         
-        # Training parameters
-        self.batch_size = getattr(config.model, 'batch_size', 64)
-        self.learning_rate = getattr(config.model, 'learning_rate', 0.001)
+        # Training parameters (RTX 4090 BEAST MODE)
+        self.batch_size = getattr(config.model, 'batch_size', 2048)  # BEAST MODE batch size
+        self.learning_rate = getattr(config.model, 'learning_rate', 0.003)  # Higher LR for large batches
         self.num_epochs = getattr(config.model, 'num_epochs', 20)
-        self.embedding_dim = getattr(config.model, 'embedding_dim', 64)
-        self.hidden_dim = getattr(config.model, 'hidden_dim', 128)
+        self.embedding_dim = getattr(config.model, 'embedding_dim', 256)  # BEAST MODE embeddings
+        self.hidden_dim = getattr(config.model, 'hidden_dim', 512)  # BEAST MODE hidden dims
         
         # Paths
         self.models_dir = Path(config.model.models_dir)
@@ -124,15 +133,17 @@ class TVShowTrainer:
             training_data['encoders']['show_id']
         )
         
-        # Create data loaders
+        # Create data loaders with RTX 4090 BEAST MODE settings
         train_loader = DataLoader(
             train_dataset, batch_size=self.batch_size, 
-            shuffle=True, num_workers=4, pin_memory=True
+            shuffle=True, num_workers=24, pin_memory=True,  # BEAST MODE workers
+            persistent_workers=True, prefetch_factor=4
         )
         
         val_loader = DataLoader(
             val_dataset, batch_size=self.batch_size,
-            shuffle=False, num_workers=4, pin_memory=True
+            shuffle=False, num_workers=24, pin_memory=True,  # BEAST MODE workers
+            persistent_workers=True, prefetch_factor=4
         )
         
         return {

@@ -30,6 +30,10 @@ from src.model import (
 from src.data_loader import TwoTowerDataLoader
 from src.trainer import TwoTowerTrainer, TwoTowerEvaluator
 
+# Import RTX 4090 BEAST MODE optimizations
+sys.path.append(str(Path(__file__).parent.parent.parent / 'neural_collaborative_filtering'))
+from performance_config import PerformanceOptimizer, apply_rtx4090_optimizations
+
 
 def setup_logging(log_level: str = "INFO"):
     """Setup comprehensive logging for training monitoring and debugging"""
@@ -63,10 +67,10 @@ def parse_args():
     parser.add_argument('--model-type', type=str, default='enhanced',
                        choices=['simple', 'enhanced', 'multitask', 'collaborative'],
                        help='Two-Tower model variant to train')
-    parser.add_argument('--embedding-dim', type=int, default=128,
-                       help='Final embedding dimension for both towers')
-    parser.add_argument('--hidden-layers', type=int, nargs='+', default=[512, 256, 128],
-                       help='Hidden layer dimensions for tower networks')
+    parser.add_argument('--embedding-dim', type=int, default=256,
+                       help='Final embedding dimension for both towers (BEAST MODE - larger embeddings)')
+    parser.add_argument('--hidden-layers', type=int, nargs='+', default=[1024, 512, 256, 128],
+                       help='Hidden layer dimensions for tower networks (BEAST MODE - deeper networks)')
     parser.add_argument('--dropout', type=float, default=0.2,
                        help='Dropout rate for regularization')
     parser.add_argument('--use-batch-norm', action='store_true', default=True,
@@ -81,8 +85,8 @@ def parse_args():
     # Training optimization arguments
     parser.add_argument('--epochs', type=int, default=50,
                        help='Maximum number of training epochs')
-    parser.add_argument('--batch-size', type=int, default=1024,
-                       help='Training batch size (larger for stable two-tower training)')
+    parser.add_argument('--batch-size', type=int, default=16384,
+                       help='Training batch size (RTX 4090 BEAST MODE - massive batches)')
     parser.add_argument('--learning-rate', type=float, default=0.001,
                        help='Adam optimizer learning rate')
     parser.add_argument('--weight-decay', type=float, default=1e-5,
@@ -100,8 +104,8 @@ def parse_args():
     parser.add_argument('--device', type=str, default='auto',
                        choices=['auto', 'cuda', 'cpu'],
                        help='Device to use')
-    parser.add_argument('--num-workers', type=int, default=4,
-                       help='Number of data loader workers')
+    parser.add_argument('--num-workers', type=int, default=24,
+                       help='Number of data loader workers (Ryzen 9 3900X - 24 threads BEAST MODE)')
     parser.add_argument('--save-dir', type=str, default='./models',
                        help='Directory to save models')
     
@@ -217,6 +221,21 @@ def main():
     
     logger.info(f"Using device: {device}")
     
+    # 🔥🔥🔥 ACTIVATE RTX 4090 BEAST MODE 🔥🔥🔥
+    apply_rtx4090_optimizations()
+    
+    # Get RTX 4090 performance config
+    perf_config = PerformanceOptimizer.get_rtx4090_config()
+    
+    # Override with BEAST MODE settings if using defaults
+    if args.batch_size == 16384:
+        args.batch_size = perf_config['batch_size']
+        logger.info(f"🚀 BEAST MODE batch size: {args.batch_size}")
+    
+    if args.num_workers == 24:
+        args.num_workers = perf_config['num_workers']
+        logger.info(f"💪 BEAST MODE workers: {args.num_workers} threads")
+    
     # Initialize wandb
     if args.use_wandb:
         wandb.init(
@@ -248,6 +267,23 @@ def main():
         # Create model
         model = create_model(args.model_type, model_config, args)
         logger.info(f"Created {args.model_type} model with {sum(p.numel() for p in model.parameters())} parameters")
+        
+        # 🔥 BEAST MODE MODEL OPTIMIZATIONS 🔥
+        model = model.to(device)
+        model = PerformanceOptimizer.optimize_model_for_speed(model)
+        
+        # Find optimal batch size for RTX 4090
+        if device == 'cuda':
+            optimal_batch = PerformanceOptimizer.get_optimal_batch_size_rtx4090(model, torch.device(device))
+            if optimal_batch > args.batch_size:
+                logger.info(f"🚀 Upgrading batch size from {args.batch_size} to {optimal_batch} for RTX 4090")
+                args.batch_size = optimal_batch
+                # Recreate data loaders with new batch size
+                train_loader, val_loader, test_loader = data_loader.create_data_loaders(
+                    batch_size=args.batch_size,
+                    num_workers=args.num_workers,
+                    model_type=args.model_type
+                )
         
         # Create trainer
         trainer = TwoTowerTrainer(
