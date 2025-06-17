@@ -421,32 +421,71 @@ def train_ncf_with_wandb(args):
             current_lr = optimizer.param_groups[0]['lr']
             training_logger.log_epoch_start(epoch, args.epochs, current_lr)
             
-            # Optimized training epoch
-            train_metrics = optimized_trainer.train_epoch(
-                train_loader, epoch, log_frequency=500  # Reduced logging frequency
-            )
+            # Training epoch
+            model.train()
+            train_losses = []
+            epoch_start_time = time.time()
             
-            train_loss = train_metrics['avg_loss']
+            for batch_idx, (user_ids, item_ids, ratings) in enumerate(train_loader):
+                user_ids = user_ids.to(device)
+                item_ids = item_ids.to(device)
+                ratings = ratings.to(device)
+                
+                if scaler:
+                    with torch.cuda.amp.autocast():
+                        outputs = model(user_ids, item_ids)
+                        loss = criterion(outputs, ratings)
+                    scaler.scale(loss).backward()
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    outputs = model(user_ids, item_ids)
+                    loss = criterion(outputs, ratings)
+                    loss.backward()
+                    optimizer.step()
+                
+                optimizer.zero_grad()
+                train_losses.append(loss.item())
+                
+                if batch_idx % 500 == 0:
+                    logger.info(f'Epoch {epoch}, Batch {batch_idx}, Loss: {loss.item():.4f}')
+            
+            train_loss = np.mean(train_losses)
             train_rmse = math.sqrt(train_loss)
+            epoch_time = time.time() - epoch_start_time
             
             # Log training metrics
             training_logger.log_epoch_end(
                 epoch, train_loss, train_rmse, 
                 {
-                    'epoch_time': train_metrics['epoch_time'],
-                    'batches_per_sec': train_metrics['batches_per_sec']
+                    'epoch_time': epoch_time,
+                    'batches_per_sec': len(train_loader) / epoch_time
                 }
             )
             
-            # Optimized validation epoch
-            val_metrics = optimized_trainer.validate_epoch(val_loader)
-            val_loss = val_metrics['avg_loss']
+            # Validation epoch
+            model.eval()
+            val_losses = []
+            val_start_time = time.time()
+            
+            with torch.no_grad():
+                for user_ids, item_ids, ratings in val_loader:
+                    user_ids = user_ids.to(device)
+                    item_ids = item_ids.to(device)
+                    ratings = ratings.to(device)
+                    
+                    outputs = model(user_ids, item_ids)
+                    loss = criterion(outputs, ratings)
+                    val_losses.append(loss.item())
+            
+            val_loss = np.mean(val_losses)
             val_rmse = math.sqrt(val_loss)
+            val_time = time.time() - val_start_time
             
             # Log validation metrics
             validation_metrics = {
                 'rmse': val_rmse,
-                'validation_time': val_metrics['validation_time']
+                'validation_time': val_time
             }
             training_logger.log_validation(epoch, val_loss, validation_metrics)
             
@@ -454,7 +493,8 @@ def train_ncf_with_wandb(args):
             scheduler.step()
             
             # Memory cleanup
-            training_optimizer.memory_cleanup(epoch)
+            if device.type == 'cuda':
+                torch.cuda.empty_cache()
             
             # Early stopping and model saving
             if val_loss < best_val_loss:
