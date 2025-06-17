@@ -210,7 +210,7 @@ def load_ratings_chunked(filepath, chunk_size=100000):
     return pd.concat(chunks, ignore_index=True)
 
 
-def prepare_data(ratings_path, device, min_ratings_user=20, min_ratings_item=20, 
+def prepare_data(ratings_path, device, args, min_ratings_user=20, min_ratings_item=20, 
                 test_size=0.2, val_size=0.1):
     """
     Prepare data for NCF training with chunked loading
@@ -246,6 +246,10 @@ def prepare_data(ratings_path, device, min_ratings_user=20, min_ratings_item=20,
     
     ratings_df['user_idx'] = user_encoder.fit_transform(ratings_df['userId'])
     ratings_df['item_idx'] = item_encoder.fit_transform(ratings_df['movieId'])
+    
+    # Get number of unique users and items
+    num_users = len(user_encoder.classes_)
+    num_items = len(item_encoder.classes_)
     
     # Normalize ratings to 0-1 range
     min_rating = ratings_df['rating'].min()
@@ -378,7 +382,7 @@ def train_ncf_with_wandb(args):
         
         # Prepare data
         train_loader, val_loader, test_loader, metadata = prepare_data(
-            args.ratings_path, device, args.min_ratings_user, args.min_ratings_item
+            args.ratings_path, device, args, args.min_ratings_user, args.min_ratings_item
         )
         
         # Log dataset information
