@@ -11,6 +11,8 @@ from torch_geometric.nn.inits import glorot, zeros
 from typing import Tuple, Dict, Optional, List, Union
 import numpy as np
 import math
+from pathlib import Path
+from typing import Dict
 
 
 class HeteroGraphSAGEConv(MessagePassing):
@@ -48,6 +50,82 @@ class HeteroGraphSAGEConv(MessagePassing):
             self.register_parameter('bias', None)
         
         self.reset_parameters()
+
+
+class GraphSAGETrainer:
+    """Trainer for GraphSAGE recommender with comprehensive checkpointing"""
+    
+    def __init__(self, model, device='cuda', learning_rate=0.001, weight_decay=1e-5, checkpoint_dir=None):
+        self.model = model.to(device)
+        self.device = device
+        self.checkpoint_dir = checkpoint_dir
+        self.optimizer = torch.optim.Adam(
+            model.parameters(), 
+            lr=learning_rate, 
+            weight_decay=weight_decay
+        )
+        
+        # Training state
+        self.best_val_loss = float('inf')
+        self.training_history = []
+        
+        # Auto-load most recent checkpoint if available
+        if checkpoint_dir:
+            self._auto_load_checkpoint(checkpoint_dir)
+    
+    def save_checkpoint(self, filepath: str, epoch: int, metrics: Dict[str, float]):
+        """Save comprehensive checkpoint with all training state"""
+        checkpoint = {
+            'epoch': epoch,
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'best_val_loss': self.best_val_loss,
+            'metrics': metrics,
+            'training_history': self.training_history,
+            'model_config': {
+                'model_class': self.model.__class__.__name__,
+                'num_users': getattr(self.model, 'num_users', None),
+                'num_items': getattr(self.model, 'num_items', None),
+                'embedding_dim': getattr(self.model, 'embedding_dim', None),
+                'num_layers': getattr(self.model, 'num_layers', None),
+            }
+        }
+        
+        torch.save(checkpoint, filepath)
+        print(f"Saved GraphSAGE checkpoint to {filepath}")
+    
+    def load_checkpoint(self, filepath: str) -> Dict:
+        """Load checkpoint and restore training state"""
+        checkpoint = torch.load(filepath, map_location=self.device)
+        
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        self.best_val_loss = checkpoint['best_val_loss']
+        self.training_history = checkpoint.get('training_history', [])
+        
+        print(f"Loaded GraphSAGE checkpoint from {filepath}")
+        return checkpoint
+    
+    def _auto_load_checkpoint(self, checkpoint_dir: str):
+        """Auto-load the most recent checkpoint from directory"""
+        import glob
+        import os
+        
+        checkpoint_path = Path(checkpoint_dir)
+        if not checkpoint_path.exists():
+            return
+        
+        checkpoint_files = list(checkpoint_path.glob("*.pt"))
+        if not checkpoint_files:
+            return
+        
+        latest_checkpoint = max(checkpoint_files, key=os.path.getmtime)
+        
+        try:
+            self.load_checkpoint(str(latest_checkpoint))
+            print(f"Auto-loaded GraphSAGE checkpoint: {latest_checkpoint}")
+        except Exception as e:
+            print(f"Failed to auto-load checkpoint {latest_checkpoint}: {e}")
     
     def reset_parameters(self):
         glorot(self.lin_src.weight)
