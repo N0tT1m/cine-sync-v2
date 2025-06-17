@@ -281,7 +281,7 @@ def prepare_data(ratings_path, device, min_ratings_user=20, min_ratings_item=20,
     training_optimizer = TrainingOptimizer(device)
     
     # Find optimal batch size for this model
-    model_temp = NCFModel(
+    model_temp = NeuralCollaborativeFiltering(
         num_users=num_users,
         num_items=num_items,
         embedding_dim=args.embedding_dim,
