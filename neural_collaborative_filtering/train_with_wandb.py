@@ -278,44 +278,19 @@ def prepare_data(ratings_path, device, args, min_ratings_user=20, min_ratings_it
         test_df['rating_norm'].values
     )
     
-    # Import training optimizations
-    from training_optimizations import TrainingOptimizer, create_ncf_sample_input
+    # Create standard data loaders
+    batch_size = args.batch_size if hasattr(args, 'batch_size') else 256
     
-    # Initialize training optimizer
-    training_optimizer = TrainingOptimizer(device)
-    
-    # Find optimal batch size for this model
-    model_temp = NeuralCollaborativeFiltering(
-        num_users=num_users,
-        num_items=num_items,
-        embedding_dim=args.embedding_dim,
-        hidden_layers=args.hidden_layers,
-        dropout=args.dropout,
-        alpha=args.alpha
-    ).to(device)
-    
-    optimal_batch_size = training_optimizer.find_optimal_batch_size(
-        model_temp,
-        lambda bs: create_ncf_sample_input(bs, device),
-        initial_batch_size=256
+    train_loader = DataLoader(
+        train_dataset, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=True
     )
-    del model_temp  # Clean up temporary model
     
-    # Create optimized data loaders
-    train_loader = training_optimizer.create_optimized_dataloader(
-        train_dataset, 
-        batch_size=optimal_batch_size,
-        shuffle=True
+    val_loader = DataLoader(
+        val_dataset, batch_size=batch_size*2, shuffle=False, num_workers=2, pin_memory=True
     )
-    val_loader = training_optimizer.create_optimized_dataloader(
-        val_dataset, 
-        batch_size=optimal_batch_size * 2,  # Larger batch for validation
-        shuffle=False
-    )
-    test_loader = training_optimizer.create_optimized_dataloader(
-        test_dataset, 
-        batch_size=optimal_batch_size * 2,
-        shuffle=False
+    
+    test_loader = DataLoader(
+        test_dataset, batch_size=batch_size*2, shuffle=False, num_workers=2, pin_memory=True
     )
     
     # Metadata
@@ -404,43 +379,38 @@ def train_ncf_with_wandb(args):
         logger.info(f"Using device: {device}")
         model = model.to(device)
         
-        # Compile model for performance optimization (20-30% speedup)
-        model = training_optimizer.compile_model(model)
+        # Compile model for performance optimization (if supported)
+        try:
+            model = torch.compile(model)
+        except Exception:
+            pass  # torch.compile not available or failed
         
         # Setup training components
         criterion = nn.MSELoss()
         optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=1e-5)
         
-        # Improved learning rate scheduling with cosine annealing
-        from training_optimizations import CosineAnnealingWarmup
-        scheduler = CosineAnnealingWarmup(
+        # Learning rate scheduling
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(
             optimizer, 
-            warmup_epochs=5, 
-            max_epochs=args.epochs,
+            T_max=args.epochs,
             eta_min=args.learning_rate * 0.01
         )
         
         # Training logger
         training_logger = WandbTrainingLogger(wandb_manager, 'ncf')
         
-        # Setup optimized training loop with mixed precision and gradient accumulation
-        from training_optimizations import OptimizedTrainingLoop
+        # Setup gradient accumulation
+        effective_batch_size = 2048
+        accumulation_steps = max(1, effective_batch_size // (args.batch_size if hasattr(args, 'batch_size') else 256))
         
-        # Calculate gradient accumulation steps for effective batch size
-        effective_batch_size = 2048  # Target effective batch size
-        accumulation_steps = training_optimizer.setup_gradient_accumulation(
-            effective_batch_size, optimal_batch_size
-        )
-        
-        # Create optimized training loop
-        optimized_trainer = OptimizedTrainingLoop(
-            model=model,
-            optimizer=optimizer,
-            criterion=criterion,
-            device=device,
-            accumulation_steps=accumulation_steps,
-            mixed_precision=device.type == 'cuda'
-        )
+        # Setup mixed precision if available
+        scaler = None
+        if device.type == 'cuda':
+            try:
+                from torch.cuda.amp import GradScaler
+                scaler = GradScaler()
+            except ImportError:
+                pass
         
         # Training loop
         best_val_loss = float('inf')
