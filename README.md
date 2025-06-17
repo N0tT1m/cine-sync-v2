@@ -792,7 +792,7 @@ python start_cinesync.py --dev
 
 For enterprise deployments, custom integrations, and professional support:
 
-- **📧 Email**: enterprise@cinesync.ai
+- **📧 Email**: enterprise@cinemacloud.tv
 - **📅 Consultation**: Schedule architecture review sessions
 - **🔧 Custom Development**: Tailored solutions for specific requirements
 - **📊 Training & Workshops**: Team training on platform usage and customization
