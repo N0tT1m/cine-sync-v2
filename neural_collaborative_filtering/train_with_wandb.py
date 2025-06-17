@@ -210,7 +210,7 @@ def load_ratings_chunked(filepath, chunk_size=100000):
     return pd.concat(chunks, ignore_index=True)
 
 
-def prepare_data(ratings_path, min_ratings_user=20, min_ratings_item=20, 
+def prepare_data(ratings_path, device, min_ratings_user=20, min_ratings_item=20, 
                 test_size=0.2, val_size=0.1):
     """
     Prepare data for NCF training with chunked loading
@@ -370,9 +370,15 @@ def train_ncf_with_wandb(args):
         wandb_manager.config.mode = 'offline'
     
     try:
+        # Setup device
+        if args.device == 'auto':
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        else:
+            device = torch.device(args.device)
+        
         # Prepare data
         train_loader, val_loader, test_loader, metadata = prepare_data(
-            args.ratings_path, args.min_ratings_user, args.min_ratings_item
+            args.ratings_path, device, args.min_ratings_user, args.min_ratings_item
         )
         
         # Log dataset information
@@ -390,12 +396,6 @@ def train_ncf_with_wandb(args):
         
         # Log model architecture
         wandb_manager.log_model_architecture(model, 'ncf')
-        
-        # Setup device
-        if args.device == 'auto':
-            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        else:
-            device = torch.device(args.device)
         
         logger.info(f"Using device: {device}")
         model = model.to(device)
