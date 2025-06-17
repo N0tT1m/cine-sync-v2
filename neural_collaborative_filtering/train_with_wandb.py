@@ -396,6 +396,49 @@ def train_ncf_with_wandb(args):
         # Training logger
         training_logger = WandbTrainingLogger(wandb_manager, 'ncf')
         
+        # Log model architecture and parameters
+        total_params = sum(p.numel() for p in model.parameters())
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        model_size_mb = sum(p.numel() * p.element_size() for p in model.parameters()) / (1024**2)
+        
+        model_info = {
+            'model/total_parameters': total_params,
+            'model/trainable_parameters': trainable_params,
+            'model/model_size_mb': model_size_mb,
+            'model/architecture': str(model),
+            'model/embedding_dim': getattr(model, 'embedding_dim', 'unknown'),
+            'model/hidden_dim': getattr(model, 'hidden_dim', 'unknown'),
+            'model/num_layers': getattr(model, 'num_layers', 'unknown')
+        }
+        
+        # Log dataset info
+        dataset_info = {
+            'dataset/num_users': train_loader.dataset.num_users if hasattr(train_loader.dataset, 'num_users') else len(train_loader.dataset),
+            'dataset/num_items': train_loader.dataset.num_items if hasattr(train_loader.dataset, 'num_items') else 'unknown',
+            'dataset/train_samples': len(train_loader.dataset),
+            'dataset/val_samples': len(val_loader.dataset),
+            'dataset/batch_size': train_loader.batch_size,
+            'dataset/num_workers': train_loader.num_workers
+        }
+        
+        # Log training configuration
+        training_config = {
+            'training/optimizer': optimizer.__class__.__name__,
+            'training/learning_rate': args.learning_rate,
+            'training/weight_decay': 1e-5,
+            'training/criterion': criterion.__class__.__name__,
+            'training/scheduler': scheduler.__class__.__name__,
+            'training/device': str(device),
+            'training/mixed_precision': scaler is not None,
+            'training/max_epochs': args.epochs
+        }
+        
+        # Log all configuration info
+        wandb_manager.log_metrics({**model_info, **dataset_info, **training_config})
+        
+        logger.info(f"Model: {total_params:,} parameters ({model_size_mb:.2f} MB)")
+        logger.info(f"Dataset: {dataset_info['dataset/train_samples']:,} train samples, {dataset_info['dataset/val_samples']:,} val samples")
+        
         # Setup gradient accumulation
         effective_batch_size = 2048
         accumulation_steps = max(1, effective_batch_size // (args.batch_size if hasattr(args, 'batch_size') else 256))
@@ -414,8 +457,11 @@ def train_ncf_with_wandb(args):
                     pass
         
         # Training loop
+        training_start_time = time.time()
         best_val_loss = float('inf')
         patience_counter = 0
+        train_losses_history = []
+        val_losses_history = []
         
         for epoch in range(args.epochs):
             # Log epoch start
@@ -428,9 +474,13 @@ def train_ncf_with_wandb(args):
             epoch_start_time = time.time()
             
             for batch_idx, (user_ids, item_ids, ratings) in enumerate(train_loader):
+                batch_start_time = time.time()
                 user_ids = user_ids.to(device)
                 item_ids = item_ids.to(device)
                 ratings = ratings.to(device)
+                
+                # Calculate gradient norm before update
+                grad_norm = None
                 
                 if scaler:
                     try:
@@ -442,32 +492,59 @@ def train_ncf_with_wandb(args):
                             outputs = model(user_ids, item_ids)
                             loss = criterion(outputs, ratings)
                     scaler.scale(loss).backward()
+                    
+                    # Calculate gradient norm
+                    grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=float('inf'))
+                    
                     scaler.step(optimizer)
                     scaler.update()
                 else:
                     outputs = model(user_ids, item_ids)
                     loss = criterion(outputs, ratings)
                     loss.backward()
+                    
+                    # Calculate gradient norm
+                    grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=float('inf'))
+                    
                     optimizer.step()
                 
                 optimizer.zero_grad()
                 train_losses.append(loss.item())
                 
+                # Calculate batch metrics
+                batch_time = time.time() - batch_start_time
+                current_lr = optimizer.param_groups[0]['lr']
+                
+                # Log batch metrics every 100 batches
+                if batch_idx % 100 == 0:
+                    batch_metrics = {
+                        'batch_loss': loss.item(),
+                        'batch_time': batch_time,
+                        'learning_rate': current_lr,
+                        'batch_progress': batch_idx / len(train_loader),
+                        'samples_processed': batch_idx * len(user_ids),
+                        'gradient_norm': grad_norm.item() if grad_norm is not None else 0.0
+                    }
+                    
+                    # Add memory metrics if CUDA available
+                    if torch.cuda.is_available():
+                        batch_metrics['gpu_memory_allocated'] = torch.cuda.memory_allocated() / 1024**2  # MB
+                        batch_metrics['gpu_memory_cached'] = torch.cuda.memory_reserved() / 1024**2  # MB
+                    
+                    training_logger.log_batch(
+                        epoch, batch_idx, len(train_loader), 
+                        loss.item(), len(user_ids), batch_metrics
+                    )
+                
                 if batch_idx % 500 == 0:
-                    logger.info(f'Epoch {epoch}, Batch {batch_idx}, Loss: {loss.item():.4f}')
+                    logger.info(f'Epoch {epoch}, Batch {batch_idx}/{len(train_loader)}, Loss: {loss.item():.4f}, LR: {current_lr:.6f}, Grad Norm: {grad_norm.item() if grad_norm else 0:.4f}')
             
             train_loss = np.mean(train_losses)
             train_rmse = math.sqrt(train_loss)
             epoch_time = time.time() - epoch_start_time
             
-            # Log training metrics
-            training_logger.log_epoch_end(
-                epoch, train_loss, train_rmse, 
-                {
-                    'epoch_time': epoch_time,
-                    'batches_per_sec': len(train_loader) / epoch_time
-                }
-            )
+            # Store training history
+            train_losses_history.append(train_loss)
             
             # Validation epoch
             model.eval()
@@ -488,15 +565,76 @@ def train_ncf_with_wandb(args):
             val_rmse = math.sqrt(val_loss)
             val_time = time.time() - val_start_time
             
-            # Log validation metrics
-            validation_metrics = {
-                'rmse': val_rmse,
-                'validation_time': val_time
+            # Store validation history
+            val_losses_history.append(val_loss)
+            
+            # Calculate additional training metrics
+            current_lr = optimizer.param_groups[0]['lr']
+            samples_per_sec = len(train_loader.dataset) / epoch_time
+            
+            # Calculate gradient statistics for the epoch
+            avg_grad_norm = np.mean([loss for loss in train_losses])  # Placeholder for actual grad norms
+            
+            # Memory metrics
+            memory_metrics = {}
+            if torch.cuda.is_available():
+                memory_metrics.update({
+                    'gpu_memory_allocated_mb': torch.cuda.memory_allocated() / 1024**2,
+                    'gpu_memory_cached_mb': torch.cuda.memory_reserved() / 1024**2,
+                    'gpu_memory_peak_mb': torch.cuda.max_memory_allocated() / 1024**2
+                })
+                torch.cuda.reset_peak_memory_stats()  # Reset for next epoch
+            
+            # System metrics
+            import psutil
+            system_metrics = {
+                'cpu_usage_percent': psutil.cpu_percent(),
+                'memory_usage_percent': psutil.virtual_memory().percent,
+                'memory_available_gb': psutil.virtual_memory().available / 1024**3
             }
-            training_logger.log_validation(epoch, val_loss, validation_metrics)
+            
+            # Training progress metrics
+            progress_metrics = {
+                'epoch_progress': (epoch + 1) / args.epochs,
+                'samples_per_second': samples_per_sec,
+                'batches_per_second': len(train_loader) / epoch_time,
+                'time_per_sample_ms': (epoch_time / len(train_loader.dataset)) * 1000
+            }
+            
+            # Log combined training and validation metrics
+            training_logger.log_epoch_end(
+                epoch, 
+                train_loss, 
+                val_loss=val_loss,
+                train_metrics={
+                    'rmse': train_rmse,
+                    'epoch_time': epoch_time,
+                    'learning_rate': current_lr,
+                    'min_loss': min(train_losses),
+                    'max_loss': max(train_losses),
+                    'std_loss': np.std(train_losses),
+                    **progress_metrics,
+                    **memory_metrics,
+                    **system_metrics
+                },
+                val_metrics={
+                    'rmse': val_rmse,
+                    'validation_time': val_time
+                }
+            )
             
             # Learning rate scheduling (cosine annealing)
+            old_lr = current_lr
             scheduler.step()
+            new_lr = optimizer.param_groups[0]['lr']
+            
+            # Log learning rate change
+            if old_lr != new_lr:
+                wandb_manager.log_metrics({
+                    'lr_change/old_lr': old_lr,
+                    'lr_change/new_lr': new_lr,
+                    'lr_change/ratio': new_lr / old_lr if old_lr > 0 else 0
+                })
             
             # Memory cleanup
             if device.type == 'cuda':
@@ -565,17 +703,76 @@ def train_ncf_with_wandb(args):
         test_loss = np.mean(test_losses)
         test_rmse = np.mean(test_rmses)
         
-        # Log final metrics
+        # Calculate comprehensive final metrics
+        total_training_time = time.time() - training_start_time
+        
+        # Performance analysis
+        improvement = (train_losses_history[0] if train_losses_history else 0) - test_loss
+        improvement_pct = (improvement / train_losses_history[0] * 100) if train_losses_history and train_losses_history[0] > 0 else 0
+        
+        # Training efficiency metrics
+        samples_total = len(train_loader.dataset) * (epoch + 1)
+        samples_per_hour = samples_total / (total_training_time / 3600)
+        epochs_per_hour = (epoch + 1) / (total_training_time / 3600)
+        
+        # Model complexity analysis
+        param_efficiency = test_rmse / (total_params / 1e6)  # RMSE per million parameters
+        
+        # Log comprehensive final metrics
         final_metrics = {
             'test_loss': test_loss,
             'test_rmse': test_rmse,
             'best_val_loss': best_val_loss,
             'total_epochs': epoch + 1,
-            'total_parameters': sum(p.numel() for p in model.parameters()),
-            'model_size_mb': sum(p.numel() * p.element_size() for p in model.parameters()) / (1024**2)
+            'total_training_time_hours': total_training_time / 3600,
+            'total_training_time_minutes': total_training_time / 60,
+            'samples_processed_total': samples_total,
+            'samples_per_hour': samples_per_hour,
+            'epochs_per_hour': epochs_per_hour,
+            'loss_improvement': improvement,
+            'loss_improvement_percent': improvement_pct,
+            'parameter_efficiency': param_efficiency,
+            'convergence_epoch': epoch + 1 - patience_counter,
+            'memory_peak_mb': torch.cuda.max_memory_allocated() / 1024**2 if torch.cuda.is_available() else 0
+        }
+        
+        # Training summary table for wandb
+        training_summary = {
+            'Training Summary': {
+                'Model': model.__class__.__name__,
+                'Parameters': f"{total_params:,}",
+                'Model Size': f"{model_size_mb:.2f} MB",
+                'Training Time': f"{total_training_time/3600:.2f} hours",
+                'Epochs': epoch + 1,
+                'Best Val RMSE': f"{np.sqrt(best_val_loss):.4f}",
+                'Test RMSE': f"{test_rmse:.4f}",
+                'Improvement': f"{improvement_pct:.2f}%",
+                'Samples/hour': f"{samples_per_hour:,.0f}",
+                'GPU Memory Peak': f"{torch.cuda.max_memory_allocated() / 1024**2:.0f} MB" if torch.cuda.is_available() else "N/A"
+            }
         }
         
         wandb_manager.log_metrics({f'final/{k}': v for k, v in final_metrics.items()})
+        wandb_manager.log_metrics(training_summary)
+        
+        # Log training history as charts
+        if len(train_losses_history) > 0:
+            history_data = {
+                'training_history/loss_curve': [(i, loss) for i, loss in enumerate(train_losses_history)],
+                'training_history/val_loss_curve': [(i, loss) for i, loss in enumerate(val_losses_history)] if val_losses_history else [],
+                'training_history/learning_rate_schedule': [(i, scheduler.get_last_lr()[0] if hasattr(scheduler, 'get_last_lr') else args.learning_rate) for i in range(len(train_losses_history))]
+            }
+            # Note: Commented out as wandb handles this automatically with epoch logging
+        
+        logger.info("="*60)
+        logger.info("TRAINING COMPLETED")
+        logger.info("="*60)
+        logger.info(f"Final Test RMSE: {test_rmse:.4f}")
+        logger.info(f"Best Validation RMSE: {np.sqrt(best_val_loss):.4f}")
+        logger.info(f"Total Training Time: {total_training_time/3600:.2f} hours")
+        logger.info(f"Model Parameters: {total_params:,}")
+        logger.info(f"Training Efficiency: {samples_per_hour:,.0f} samples/hour")
+        logger.info("="*60)
         
         # Run Weave evaluation if test data is available
         try:
