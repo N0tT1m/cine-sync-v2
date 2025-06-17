@@ -5,6 +5,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import math
+from typing import Optional, Tuple, Dict
 
 
 class NeuralCollaborativeFiltering(nn.Module):
@@ -170,6 +172,227 @@ class SimpleNCF(nn.Module):
         
         # Scale to 0-5 rating range
         return torch.sigmoid(x).squeeze() * 5.0
+
+
+class CrossAttentionNCF(nn.Module):
+    """
+    Modern NCF with cross-attention and contrastive learning
+    
+    Advanced features:
+    - Multi-head cross-attention between user/item embeddings
+    - Feature-wise interaction networks
+    - Contrastive learning with InfoNCE loss
+    - Dynamic embedding dimensions
+    - Mixture of experts for different user types
+    """
+    
+    def __init__(self, num_users, num_items, num_genres=20, embedding_dim=256, 
+                 hidden_layers=[512, 256, 128], dropout=0.2, num_heads=8, 
+                 use_moe=True, num_experts=4, temperature=0.07):
+        super(CrossAttentionNCF, self).__init__()
+        
+        self.num_users = num_users
+        self.num_items = num_items
+        self.embedding_dim = embedding_dim
+        self.num_heads = num_heads
+        self.temperature = temperature
+        self.use_moe = use_moe
+        
+        # Enhanced embeddings with learnable scaling
+        self.user_embedding = nn.Embedding(num_users, embedding_dim)
+        self.item_embedding = nn.Embedding(num_items, embedding_dim)
+        self.genre_embedding = nn.Embedding(num_genres, embedding_dim // 4)
+        
+        # Embedding scaling factors
+        self.user_scale = nn.Parameter(torch.ones(1))
+        self.item_scale = nn.Parameter(torch.ones(1))
+        
+        # Cross-attention mechanism
+        self.cross_attention = nn.MultiheadAttention(
+            embed_dim=embedding_dim,
+            num_heads=num_heads,
+            dropout=dropout,
+            batch_first=True
+        )
+        
+        # Feature-wise interaction network
+        self.feature_interaction = FeatureWiseInteraction(embedding_dim, dropout)
+        
+        # Mixture of Experts for user types
+        if use_moe:
+            self.moe_gate = nn.Linear(embedding_dim, num_experts)
+            self.experts = nn.ModuleList([
+                nn.Sequential(
+                    nn.Linear(embedding_dim * 2, hidden_layers[0]),
+                    nn.LayerNorm(hidden_layers[0]),
+                    nn.ReLU(),
+                    nn.Dropout(dropout)
+                ) for _ in range(num_experts)
+            ])
+        
+        # Enhanced MLP with residual connections
+        self.mlp_layers = nn.ModuleList()
+        input_size = embedding_dim * 2
+        
+        for i, hidden_size in enumerate(hidden_layers):
+            self.mlp_layers.append(nn.Sequential(
+                nn.Linear(input_size, hidden_size),
+                nn.LayerNorm(hidden_size),
+                nn.ReLU(),
+                nn.Dropout(dropout)
+            ))
+            input_size = hidden_size
+        
+        # Multi-task prediction heads
+        self.rating_head = nn.Linear(hidden_layers[-1], 1)
+        self.genre_head = nn.Linear(hidden_layers[-1], num_genres)
+        self.popularity_head = nn.Linear(hidden_layers[-1], 1)
+        
+        # Contrastive projection head
+        self.projection_head = nn.Sequential(
+            nn.Linear(hidden_layers[-1], embedding_dim),
+            nn.ReLU(),
+            nn.Linear(embedding_dim, embedding_dim // 2)
+        )
+        
+        self._init_weights()
+    
+    def _init_weights(self):
+        for module in self.modules():
+            if isinstance(module, nn.Embedding):
+                nn.init.xavier_normal_(module.weight)
+            elif isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+    
+    def forward(self, user_ids, item_ids, genre_ids=None, return_embeddings=False):
+        batch_size = user_ids.size(0)
+        
+        # Get scaled embeddings
+        user_emb = self.user_embedding(user_ids) * self.user_scale
+        item_emb = self.item_embedding(item_ids) * self.item_scale
+        
+        # Cross-attention between user and item embeddings
+        user_attended, _ = self.cross_attention(
+            user_emb.unsqueeze(1), item_emb.unsqueeze(1), item_emb.unsqueeze(1)
+        )
+        item_attended, _ = self.cross_attention(
+            item_emb.unsqueeze(1), user_emb.unsqueeze(1), user_emb.unsqueeze(1)
+        )
+        
+        user_final = user_attended.squeeze(1) + user_emb
+        item_final = item_attended.squeeze(1) + item_emb
+        
+        # Feature-wise interaction
+        interaction_features = self.feature_interaction(user_final, item_final)
+        
+        # Concatenate features
+        combined = torch.cat([user_final, item_final], dim=1)
+        
+        # Mixture of Experts (if enabled)
+        if self.use_moe:
+            gate_weights = F.softmax(self.moe_gate(user_final), dim=-1)
+            expert_outputs = []
+            
+            for expert in self.experts:
+                expert_out = expert(combined)
+                expert_outputs.append(expert_out)
+            
+            expert_stack = torch.stack(expert_outputs, dim=2)  # [batch, hidden, num_experts]
+            moe_output = torch.sum(expert_stack * gate_weights.unsqueeze(1), dim=2)
+            x = moe_output
+        else:
+            x = combined
+        
+        # Enhanced MLP with residual connections
+        residual = None
+        for i, layer in enumerate(self.mlp_layers):
+            x_new = layer(x)
+            if residual is not None and x_new.size(-1) == residual.size(-1):
+                x_new = x_new + residual
+            residual = x_new
+            x = x_new
+        
+        # Multi-task predictions
+        rating_pred = torch.sigmoid(self.rating_head(x)).squeeze() * 5.0
+        genre_pred = self.genre_head(x)
+        popularity_pred = torch.sigmoid(self.popularity_head(x)).squeeze()
+        
+        outputs = {
+            'rating': rating_pred,
+            'genre_logits': genre_pred,
+            'popularity': popularity_pred
+        }
+        
+        if return_embeddings:
+            projection = F.normalize(self.projection_head(x), dim=-1)
+            outputs['embeddings'] = projection
+            outputs['user_emb'] = user_final
+            outputs['item_emb'] = item_final
+        
+        return outputs
+    
+    def compute_contrastive_loss(self, user_ids, pos_item_ids, neg_item_ids):
+        """Compute InfoNCE contrastive loss"""
+        # Get embeddings for positive pairs
+        pos_outputs = self.forward(user_ids, pos_item_ids, return_embeddings=True)
+        pos_embeddings = pos_outputs['embeddings']
+        
+        # Get embeddings for negative pairs
+        neg_outputs = self.forward(user_ids, neg_item_ids, return_embeddings=True)
+        neg_embeddings = neg_outputs['embeddings']
+        
+        # Compute similarity scores
+        pos_sim = torch.sum(pos_embeddings * pos_embeddings, dim=1) / self.temperature
+        neg_sim = torch.sum(pos_embeddings * neg_embeddings, dim=1) / self.temperature
+        
+        # InfoNCE loss
+        logits = torch.cat([pos_sim.unsqueeze(1), neg_sim.unsqueeze(1)], dim=1)
+        labels = torch.zeros(user_ids.size(0), dtype=torch.long, device=user_ids.device)
+        
+        return F.cross_entropy(logits, labels)
+
+
+class FeatureWiseInteraction(nn.Module):
+    """Feature-wise interaction network for learning cross-features"""
+    
+    def __init__(self, embedding_dim, dropout=0.1):
+        super(FeatureWiseInteraction, self).__init__()
+        
+        self.embedding_dim = embedding_dim
+        
+        # Learnable interaction weights
+        self.interaction_weights = nn.Parameter(torch.randn(embedding_dim, embedding_dim))
+        self.bias = nn.Parameter(torch.zeros(embedding_dim))
+        
+        # Attention for feature importance
+        self.feature_attention = nn.Sequential(
+            nn.Linear(embedding_dim * 2, embedding_dim),
+            nn.Tanh(),
+            nn.Linear(embedding_dim, embedding_dim),
+            nn.Sigmoid()
+        )
+        
+        self.dropout = nn.Dropout(dropout)
+        
+    def forward(self, user_emb, item_emb):
+        # Element-wise product
+        element_wise = user_emb * item_emb
+        
+        # Bilinear interaction
+        bilinear = torch.matmul(user_emb.unsqueeze(1), self.interaction_weights)
+        bilinear = torch.matmul(bilinear, item_emb.unsqueeze(-1)).squeeze()
+        
+        # Feature attention
+        concat_features = torch.cat([user_emb, item_emb], dim=1)
+        attention_weights = self.feature_attention(concat_features)
+        
+        # Combine interactions
+        combined = element_wise + bilinear + self.bias
+        attended = combined * attention_weights
+        
+        return self.dropout(attended)
 
 
 class DeepNCF(nn.Module):

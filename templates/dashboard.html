@@ -1,0 +1,307 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - CineSync v2 Admin{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2">Dashboard</h1>
+    <div class="btn-toolbar mb-2 mb-md-0">
+        <div class="btn-group me-2">
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="refreshDashboard()">
+                <i class="bi bi-arrow-clockwise"></i> Refresh
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Model Status Overview -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card metric-card">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="card-title text-muted">Total Models</h6>
+                        <h2 class="mb-0">{{ model_status.total_models }}</h2>
+                    </div>
+                    <div class="text-primary">
+                        <i class="bi bi-cpu fs-2"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="card metric-card">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="card-title text-muted">Loaded Models</h6>
+                        <h2 class="mb-0 text-success">{{ model_status.loaded_count }}</h2>
+                    </div>
+                    <div class="text-success">
+                        <i class="bi bi-check-circle fs-2"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="card metric-card">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="card-title text-muted">Training Samples</h6>
+                        <h2 class="mb-0">{{ training_stats.total_feedback | default(0) }}</h2>
+                    </div>
+                    <div class="text-info">
+                        <i class="bi bi-graph-up fs-2"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="card metric-card">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="card-title text-muted">Unique Users</h6>
+                        <h2 class="mb-0">{{ training_stats.unique_users | default(0) }}</h2>
+                    </div>
+                    <div class="text-warning">
+                        <i class="bi bi-people fs-2"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Model Status Cards -->
+<div class="row mb-4">
+    <div class="col-12">
+        <h3>Model Status</h3>
+        <div class="row">
+            {% for model_name, is_loaded in model_status.loaded_models.items() %}
+            <div class="col-md-6 col-lg-4 mb-3">
+                <div class="card model-card h-100">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <h6 class="card-title">{{ model_name.replace('_', ' ').title() }}</h6>
+                            {% if is_loaded %}
+                                <span class="badge bg-success status-badge">Online</span>
+                            {% else %}
+                                <span class="badge bg-danger status-badge">Offline</span>
+                            {% endif %}
+                        </div>
+                        
+                        {% if model_status.last_updated.get(model_name) %}
+                        <p class="card-text small text-muted">
+                            Last updated: {{ model_status.last_updated[model_name] }}
+                        </p>
+                        {% endif %}
+                        
+                        {% if model_status.model_errors.get(model_name) %}
+                        <div class="alert alert-danger alert-sm p-2 small">
+                            Error: {{ model_status.model_errors[model_name] }}
+                        </div>
+                        {% endif %}
+                        
+                        <div class="btn-group btn-group-sm w-100" role="group">
+                            <button type="button" class="btn btn-outline-primary" 
+                                    onclick="reloadModel('{{ model_name }}', this)">
+                                <span class="loading-spinner spinner-border spinner-border-sm me-1"></span>
+                                <span class="button-text">Reload</span>
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary" 
+                                    onclick="toggleModel('{{ model_name }}', this)">
+                                <span class="loading-spinner spinner-border spinner-border-sm me-1"></span>
+                                <span class="button-text">Toggle</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<!-- Recent Feedback -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Recent Feedback</h5>
+                <small class="text-muted">Last 10 entries</small>
+            </div>
+            <div class="card-body">
+                {% if recent_feedback %}
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>User ID</th>
+                                <th>Item ID</th>
+                                <th>Rating</th>
+                                <th>Content Type</th>
+                                <th>Timestamp</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for feedback in recent_feedback[:10] %}
+                            <tr>
+                                <td>{{ feedback.user_id }}</td>
+                                <td>{{ feedback.item_id }}</td>
+                                <td>
+                                    <span class="badge bg-primary">{{ feedback.rating }}</span>
+                                </td>
+                                <td>
+                                    <span class="badge bg-info">{{ feedback.content_type }}</span>
+                                </td>
+                                <td class="small text-muted">{{ feedback.timestamp }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-center py-4">
+                    <i class="bi bi-inbox fs-1 text-muted"></i>
+                    <p class="text-muted mt-2">No feedback data available yet</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Training Statistics -->
+<div class="row">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Training Statistics</h5>
+            </div>
+            <div class="card-body">
+                <dl class="row">
+                    <dt class="col-sm-6">Average Rating:</dt>
+                    <dd class="col-sm-6">{{ "%.2f" | format(training_stats.avg_rating | default(0)) }}</dd>
+                    
+                    <dt class="col-sm-6">Unique Items:</dt>
+                    <dd class="col-sm-6">{{ training_stats.unique_items | default(0) }}</dd>
+                    
+                    <dt class="col-sm-6">Last Feedback:</dt>
+                    <dd class="col-sm-6">
+                        {% if training_stats.last_feedback %}
+                            {{ training_stats.last_feedback }}
+                        {% else %}
+                            <span class="text-muted">None</span>
+                        {% endif %}
+                    </dd>
+                </dl>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Quick Actions</h5>
+            </div>
+            <div class="card-body">
+                <div class="d-grid gap-2">
+                    <button type="button" class="btn btn-primary" onclick="triggerRetraining(this)">
+                        <span class="loading-spinner spinner-border spinner-border-sm me-2"></span>
+                        <span class="button-text">
+                            <i class="bi bi-gear me-1"></i> Trigger Model Retraining
+                        </span>
+                    </button>
+                    
+                    <a href="{{ url_for('training_page') }}" class="btn btn-outline-secondary">
+                        <i class="bi bi-sliders me-1"></i> Configure Training
+                    </a>
+                    
+                    <a href="{{ url_for('upload_page') }}" class="btn btn-outline-success">
+                        <i class="bi bi-upload me-1"></i> Upload New Model
+                    </a>
+                    
+                    <a href="{{ url_for('analytics_page') }}" class="btn btn-outline-info">
+                        <i class="bi bi-graph-up me-1"></i> View Analytics
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    async function reloadModel(modelName, button) {
+        showLoading(button);
+        
+        try {
+            const response = await makeRequest(`/api/models/${modelName}/reload`, {
+                method: 'POST'
+            });
+            
+            showAlert(`Model ${modelName} reloaded successfully`, 'success');
+            setTimeout(() => refreshDashboard(), 1000);
+        } catch (error) {
+            showAlert(`Failed to reload ${modelName}: ${error.message}`, 'danger');
+        } finally {
+            hideLoading(button);
+        }
+    }
+    
+    async function toggleModel(modelName, button) {
+        showLoading(button);
+        
+        try {
+            const response = await makeRequest(`/api/models/${modelName}/toggle`, {
+                method: 'POST'
+            });
+            
+            const status = response.enabled ? 'enabled' : 'disabled';
+            showAlert(`Model ${modelName} ${status} successfully`, 'success');
+            setTimeout(() => refreshDashboard(), 1000);
+        } catch (error) {
+            showAlert(`Failed to toggle ${modelName}: ${error.message}`, 'danger');
+        } finally {
+            hideLoading(button);
+        }
+    }
+    
+    async function triggerRetraining(button) {
+        if (!confirm('Are you sure you want to trigger model retraining? This may take a while.')) {
+            return;
+        }
+        
+        showLoading(button);
+        
+        try {
+            const response = await makeRequest('/api/training/trigger_retrain', {
+                method: 'POST'
+            });
+            
+            showAlert('Model retraining started successfully', 'success');
+        } catch (error) {
+            showAlert(`Failed to trigger retraining: ${error.message}`, 'danger');
+        } finally {
+            hideLoading(button);
+        }
+    }
+    
+    function refreshDashboard() {
+        location.reload();
+    }
+    
+    // Auto-refresh dashboard every 30 seconds
+    setInterval(refreshDashboard, 30000);
+</script>
+{% endblock %}

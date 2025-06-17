@@ -250,6 +250,352 @@ class MultVAE(nn.Module):
             return top_k_items, top_k_probs
 
 
+class HierarchicalVAE(nn.Module):
+    """
+    Modern Hierarchical VAE with advanced techniques:
+    - Hierarchical latent spaces
+    - Normalizing flows
+    - Adversarial training
+    - Disentangled representations
+    - Contrastive learning
+    """
+    
+    def __init__(
+        self,
+        num_items: int,
+        num_users: int,
+        num_genres: int = 20,
+        hidden_dims: List[int] = [1024, 512, 256],
+        latent_dim: int = 256,
+        num_flows: int = 4,
+        dropout: float = 0.2,
+        beta: float = 1.0,
+        use_flows: bool = True,
+        use_adversarial: bool = True,
+        temperature: float = 0.07
+    ):
+        super(HierarchicalVAE, self).__init__()
+        
+        self.num_items = num_items
+        self.num_users = num_users
+        self.latent_dim = latent_dim
+        self.beta = beta
+        self.use_flows = use_flows
+        self.use_adversarial = use_adversarial
+        self.temperature = temperature
+        
+        # Hierarchical encoder structure
+        self.global_encoder = VariationalEncoder(num_items, hidden_dims, latent_dim, dropout)
+        self.local_encoder = VariationalEncoder(num_items, hidden_dims[:2], latent_dim // 2, dropout)
+        
+        # Normalizing flows for posterior approximation
+        if use_flows:
+            self.flows = nn.ModuleList([
+                PlanarFlow(latent_dim) for _ in range(num_flows)
+            ])
+        
+        # Hierarchical decoder with attention
+        self.global_decoder = HierarchicalDecoder(latent_dim, hidden_dims[::-1], num_items, dropout)
+        self.local_decoder = HierarchicalDecoder(latent_dim // 2, hidden_dims[:2][::-1], num_items, dropout)
+        
+        # Adversarial discriminator
+        if use_adversarial:
+            self.discriminator = nn.Sequential(
+                nn.Linear(latent_dim, hidden_dims[0]),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden_dims[0], hidden_dims[1]),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden_dims[1], 1)
+            )
+        
+        # Disentanglement components
+        self.content_encoder = VariationalEncoder(num_items, hidden_dims[:2], latent_dim // 4, dropout)
+        self.style_encoder = VariationalEncoder(num_items, hidden_dims[:2], latent_dim // 4, dropout)
+        
+        # Cross-modal fusion
+        self.fusion_layer = nn.Sequential(
+            nn.Linear(latent_dim + latent_dim // 2, latent_dim),
+            nn.LayerNorm(latent_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout)
+        )
+        
+        # Contrastive projection head
+        self.projection_head = nn.Sequential(
+            nn.Linear(latent_dim, latent_dim),
+            nn.ReLU(),
+            nn.Linear(latent_dim, latent_dim // 2)
+        )
+        
+        # Multi-task heads
+        self.reconstruction_head = nn.Linear(latent_dim, num_items)
+        self.genre_head = nn.Linear(latent_dim, num_genres)
+        self.popularity_head = nn.Linear(latent_dim, 10)  # Popularity buckets
+        
+        # Beta scheduling
+        self.beta_scheduler = BetaScheduler(beta_max=beta, warmup_steps=5000)
+        
+        self._init_weights()
+    
+    def _init_weights(self):
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+    
+    def reparameterize_with_flows(self, mu, logvar):
+        """Reparameterization with normalizing flows"""
+        if self.training:
+            std = torch.exp(0.5 * logvar)
+            eps = torch.randn_like(std)
+            z = mu + eps * std
+            
+            if self.use_flows:
+                log_det_jacobian = 0
+                for flow in self.flows:
+                    z, ldj = flow(z)
+                    log_det_jacobian += ldj
+                return z, log_det_jacobian
+            else:
+                return z, torch.zeros_like(mu[:, 0])
+        else:
+            if self.use_flows:
+                z = mu
+                for flow in self.flows:
+                    z, _ = flow(z)
+                return z, torch.zeros_like(mu[:, 0])
+            else:
+                return mu, torch.zeros_like(mu[:, 0])
+    
+    def forward(self, user_ratings, step=None, return_all=False):
+        batch_size = user_ratings.size(0)
+        normalized_ratings = F.normalize(user_ratings, p=1, dim=1)
+        
+        # Hierarchical encoding
+        global_z, global_mu, global_logvar = self.global_encoder(normalized_ratings)
+        local_z, local_mu, local_logvar = self.local_encoder(normalized_ratings)
+        
+        # Apply flows to global latent space
+        if self.use_flows:
+            global_z, flow_ldj = self.reparameterize_with_flows(global_mu, global_logvar)
+        else:
+            flow_ldj = torch.zeros_like(global_mu[:, 0])
+        
+        # Disentangled representations
+        content_z, content_mu, content_logvar = self.content_encoder(normalized_ratings)
+        style_z, style_mu, style_logvar = self.style_encoder(normalized_ratings)
+        
+        # Fusion of hierarchical representations
+        combined_z = torch.cat([global_z, local_z], dim=1)
+        fused_z = self.fusion_layer(combined_z)
+        
+        # Hierarchical decoding
+        global_recon = self.global_decoder(global_z)
+        local_recon = self.local_decoder(local_z)
+        
+        # Final reconstruction
+        reconstruction = self.reconstruction_head(fused_z)
+        
+        # Multi-task predictions
+        genre_pred = self.genre_head(fused_z)
+        popularity_pred = self.popularity_head(fused_z)
+        
+        # Compute losses
+        current_beta = self.beta_scheduler.get_beta(step) if step is not None else self.beta
+        
+        # Reconstruction loss with hierarchical weighting
+        recon_loss = (
+            0.6 * F.mse_loss(reconstruction, normalized_ratings, reduction='none').sum(dim=1) +
+            0.3 * F.mse_loss(global_recon, normalized_ratings, reduction='none').sum(dim=1) +
+            0.1 * F.mse_loss(local_recon, normalized_ratings, reduction='none').sum(dim=1)
+        )
+        
+        # KL divergences with improved calculation
+        global_kl = self._kl_divergence(global_mu, global_logvar) - flow_ldj
+        local_kl = self._kl_divergence(local_mu, local_logvar)
+        content_kl = self._kl_divergence(content_mu, content_logvar)
+        style_kl = self._kl_divergence(style_mu, style_logvar)
+        
+        total_kl = global_kl + 0.5 * local_kl + 0.3 * content_kl + 0.3 * style_kl
+        
+        # Disentanglement loss (mutual information)
+        disentangle_loss = self._mutual_information_loss(content_z, style_z)
+        
+        # Adversarial loss
+        adversarial_loss = torch.zeros_like(recon_loss)
+        if self.use_adversarial:
+            real_labels = torch.ones(batch_size, 1, device=user_ratings.device)
+            fake_labels = torch.zeros(batch_size, 1, device=user_ratings.device)
+            
+            # Generator loss (fool discriminator)
+            gen_loss = F.binary_cross_entropy_with_logits(
+                self.discriminator(fused_z), real_labels, reduction='none'
+            ).squeeze()
+            adversarial_loss = 0.1 * gen_loss
+        
+        # Total loss
+        total_loss = (
+            recon_loss + 
+            current_beta * total_kl + 
+            0.1 * disentangle_loss + 
+            adversarial_loss
+        )
+        
+        outputs = {
+            'reconstruction': reconstruction,
+            'global_recon': global_recon,
+            'local_recon': local_recon,
+            'genre_pred': genre_pred,
+            'popularity_pred': popularity_pred,
+            'global_z': global_z,
+            'local_z': local_z,
+            'fused_z': fused_z,
+            'recon_loss': recon_loss,
+            'kl_loss': total_kl,
+            'disentangle_loss': disentangle_loss,
+            'adversarial_loss': adversarial_loss,
+            'total_loss': total_loss,
+            'beta': current_beta
+        }
+        
+        if return_all:
+            outputs.update({
+                'content_z': content_z,
+                'style_z': style_z,
+                'flow_ldj': flow_ldj,
+                'global_mu': global_mu,
+                'global_logvar': global_logvar
+            })
+        
+        return outputs
+    
+    def _kl_divergence(self, mu, logvar):
+        """Improved KL divergence calculation"""
+        return 0.5 * torch.sum(logvar.exp() + mu.pow(2) - logvar - 1, dim=1)
+    
+    def _mutual_information_loss(self, content_z, style_z):
+        """Mutual information loss for disentanglement"""
+        # Simple implementation using correlation
+        content_norm = F.normalize(content_z, dim=1)
+        style_norm = F.normalize(style_z, dim=1)
+        
+        correlation = torch.abs(torch.sum(content_norm * style_norm, dim=1))
+        return correlation.mean()
+    
+    def compute_contrastive_loss(self, anchor_ratings, positive_ratings, negative_ratings):
+        """Contrastive learning for better representations"""
+        anchor_out = self.forward(anchor_ratings)
+        positive_out = self.forward(positive_ratings)
+        negative_out = self.forward(negative_ratings)
+        
+        # Project to contrastive space
+        anchor_proj = F.normalize(self.projection_head(anchor_out['fused_z']), dim=1)
+        positive_proj = F.normalize(self.projection_head(positive_out['fused_z']), dim=1)
+        negative_proj = F.normalize(self.projection_head(negative_out['fused_z']), dim=1)
+        
+        # Compute similarities
+        pos_sim = torch.sum(anchor_proj * positive_proj, dim=1) / self.temperature
+        neg_sim = torch.sum(anchor_proj * negative_proj, dim=1) / self.temperature
+        
+        # InfoNCE loss
+        logits = torch.cat([pos_sim.unsqueeze(1), neg_sim.unsqueeze(1)], dim=1)
+        labels = torch.zeros(anchor_ratings.size(0), dtype=torch.long, device=anchor_ratings.device)
+        
+        return F.cross_entropy(logits, labels)
+
+
+class PlanarFlow(nn.Module):
+    """Planar normalizing flow for improved posterior approximation"""
+    
+    def __init__(self, dim):
+        super(PlanarFlow, self).__init__()
+        self.weight = nn.Parameter(torch.randn(1, dim))
+        self.bias = nn.Parameter(torch.randn(1))
+        self.scale = nn.Parameter(torch.randn(1, dim))
+        
+    def forward(self, z):
+        # Planar transformation: f(z) = z + u * tanh(w^T z + b)
+        linear_term = F.linear(z, self.weight, self.bias)
+        transformed = z + self.scale * torch.tanh(linear_term)
+        
+        # Log determinant of Jacobian
+        psi = (1 - torch.tanh(linear_term) ** 2) * self.weight
+        log_det_jacobian = torch.log(torch.abs(1 + torch.sum(psi * self.scale, dim=1)) + 1e-8)
+        
+        return transformed, log_det_jacobian
+
+
+class HierarchicalDecoder(nn.Module):
+    """Hierarchical decoder with attention mechanisms"""
+    
+    def __init__(self, latent_dim, hidden_dims, output_dim, dropout=0.2):
+        super(HierarchicalDecoder, self).__init__()
+        
+        # Multi-level decoding
+        self.decoders = nn.ModuleList()
+        prev_dim = latent_dim
+        
+        for hidden_dim in hidden_dims:
+            self.decoders.append(nn.Sequential(
+                nn.Linear(prev_dim, hidden_dim),
+                nn.LayerNorm(hidden_dim),
+                nn.ReLU(),
+                nn.Dropout(dropout)
+            ))
+            prev_dim = hidden_dim
+        
+        # Attention mechanism
+        self.attention = nn.MultiheadAttention(
+            embed_dim=prev_dim,
+            num_heads=8,
+            dropout=dropout,
+            batch_first=True
+        )
+        
+        # Output layer
+        self.output_layer = nn.Linear(prev_dim, output_dim)
+        
+    def forward(self, z):
+        x = z
+        
+        # Multi-level decoding
+        for decoder in self.decoders:
+            x = decoder(x)
+        
+        # Self-attention for better reconstruction
+        x_expanded = x.unsqueeze(1)  # Add sequence dimension
+        attended_x, _ = self.attention(x_expanded, x_expanded, x_expanded)
+        x = attended_x.squeeze(1)
+        
+        return self.output_layer(x)
+
+
+class BetaScheduler:
+    """Beta scheduling for VAE training"""
+    
+    def __init__(self, beta_max=1.0, warmup_steps=5000, schedule='linear'):
+        self.beta_max = beta_max
+        self.warmup_steps = warmup_steps
+        self.schedule = schedule
+    
+    def get_beta(self, step):
+        if step is None:
+            return self.beta_max
+        
+        if self.schedule == 'linear':
+            return min(self.beta_max, step / self.warmup_steps * self.beta_max)
+        elif self.schedule == 'cosine':
+            if step < self.warmup_steps:
+                return 0.5 * self.beta_max * (1 - math.cos(math.pi * step / self.warmup_steps))
+            else:
+                return self.beta_max
+        else:
+            return self.beta_max
+
+
 class EnhancedMultVAE(MultVAE):
     """
     Enhanced MultVAE with additional features for better performance
