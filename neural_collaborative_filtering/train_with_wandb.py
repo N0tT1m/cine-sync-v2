@@ -404,10 +404,14 @@ def train_ncf_with_wandb(args):
         scaler = None
         if device.type == 'cuda':
             try:
-                from torch.cuda.amp import GradScaler
-                scaler = GradScaler()
+                from torch.amp import GradScaler
+                scaler = GradScaler('cuda')
             except ImportError:
-                pass
+                try:
+                    from torch.cuda.amp import GradScaler
+                    scaler = GradScaler()
+                except ImportError:
+                    pass
         
         # Training loop
         best_val_loss = float('inf')
@@ -429,9 +433,14 @@ def train_ncf_with_wandb(args):
                 ratings = ratings.to(device)
                 
                 if scaler:
-                    with torch.cuda.amp.autocast():
-                        outputs = model(user_ids, item_ids)
-                        loss = criterion(outputs, ratings)
+                    try:
+                        with torch.amp.autocast('cuda'):
+                            outputs = model(user_ids, item_ids)
+                            loss = criterion(outputs, ratings)
+                    except AttributeError:
+                        with torch.cuda.amp.autocast():
+                            outputs = model(user_ids, item_ids)
+                            loss = criterion(outputs, ratings)
                     scaler.scale(loss).backward()
                     scaler.step(optimizer)
                     scaler.update()
