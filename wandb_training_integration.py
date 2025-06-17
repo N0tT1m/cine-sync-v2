@@ -123,6 +123,23 @@ class WandbTrainingLogger:
         logger.info(f"Epoch {epoch} completed - Train Loss: {train_loss:.4f}" + 
                    (f", Val Loss: {val_loss:.4f}" if val_loss else ""))
     
+    def log_validation(self, epoch: int, val_loss: float, val_metrics: Dict[str, float] = None):
+        """Log validation metrics"""
+        log_dict = {
+            'epoch': epoch,
+            'val_loss': val_loss
+        }
+        
+        # Add validation metrics
+        if val_metrics:
+            for key, value in val_metrics.items():
+                log_dict[f'val_{key}'] = value
+        
+        # Log validation metrics (don't commit - let epoch_end handle the commit)
+        self.wandb_manager.log_metrics(log_dict, commit=False)
+        
+        logger.info(f"Validation completed - Val Loss: {val_loss:.4f}")
+    
     def get_current_step(self) -> int:
         """Get current global step for external logging coordination"""
         import wandb

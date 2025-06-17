@@ -12,6 +12,12 @@ import json
 
 from .model import NeuralCollaborativeFiltering, SimpleNCF, DeepNCF
 
+try:
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
+
 
 class NCFTrainer:
     """
@@ -249,6 +255,19 @@ class NCFTrainer:
                 f"R²: {val_metrics['r2']:.4f} | "
                 f"Time: {epoch_time:.2f}s"
             )
+            
+            # Log to wandb if available
+            if WANDB_AVAILABLE and wandb.run is not None:
+                wandb.log({
+                    'epoch': epoch + 1,
+                    'train_loss': train_loss,
+                    'val_loss': val_metrics['loss'],
+                    'val_rmse': val_metrics['rmse'],
+                    'val_mae': val_metrics['mae'],
+                    'val_r2': val_metrics['r2'],
+                    'epoch_time': epoch_time,
+                    'learning_rate': self.optimizer.param_groups[0]['lr']
+                })
             
             # Early stopping mechanism to prevent overfitting
             if val_metrics['loss'] < self.best_val_loss:

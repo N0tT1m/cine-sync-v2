@@ -252,9 +252,19 @@ def main():
         
         # Log to wandb if enabled
         if args.use_wandb:
-            # Use automatic stepping to avoid step conflicts
-            wandb.log(all_metrics)
-            wandb.log({"training_history": history})
+            # Log final test metrics with clear prefix to avoid conflicts
+            final_metrics = {f'test_{key}': value for key, value in all_metrics.items()}
+            wandb.log(final_metrics)
+            
+            # Log training history summary
+            if history:
+                wandb.log({
+                    "final_train_loss": history['train_losses'][-1] if history['train_losses'] else None,
+                    "final_val_loss": history['val_losses'][-1] if history['val_losses'] else None,
+                    "final_val_rmse": history['val_rmses'][-1] if history['val_rmses'] else None,
+                    "final_val_mae": history['val_maes'][-1] if history['val_maes'] else None,
+                    "total_epochs": len(history['train_losses']) if history['train_losses'] else 0
+                })
         
         # Save all artifacts needed for model deployment
         save_path = Path(args.save_dir)
