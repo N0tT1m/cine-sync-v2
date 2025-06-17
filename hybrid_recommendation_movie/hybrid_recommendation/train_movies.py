@@ -29,6 +29,10 @@ sys.path.append(str(Path(__file__).parent.parent.parent))
 from wandb_config import init_wandb_for_training, WandbManager
 from wandb_training_integration import WandbTrainingLogger
 
+# Import RTX 4090 BEAST MODE optimizations
+sys.path.append(str(Path(__file__).parent.parent.parent / 'neural_collaborative_filtering'))
+from performance_config import PerformanceOptimizer, apply_rtx4090_optimizations
+
 from models.movie_recommender import MovieRecommendationSystem
 from config import load_config
 
@@ -146,8 +150,15 @@ def train_movie_model_with_wandb(ratings_df: pd.DataFrame, movies_df: pd.DataFra
     
     logger.info(f"Dataset metadata: {metadata}")
     
-    # Setup device
+    # Setup device with RTX 4090 BEAST MODE
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    # 🔥🔥🔥 ACTIVATE HYBRID MOVIE MODEL BEAST MODE 🔥🔥🔥
+    apply_rtx4090_optimizations()
+    
+    if device.type == 'cuda':
+        logger.info("🚀 RTX 4090 BEAST MODE ACTIVATED for Hybrid Movie Recommendations!")
+        PerformanceOptimizer.setup_maximum_performance()
     logger.info(f"Training on device: {device}")
     
     # Get the model to log its architecture

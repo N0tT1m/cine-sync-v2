@@ -31,6 +31,10 @@ from src.model import (
 from src.data_loader import SequentialDataLoader
 from src.trainer import SequentialTrainer, SequentialEvaluator
 
+# Import RTX 4090 BEAST MODE optimizations
+sys.path.append(str(Path(__file__).parent.parent.parent / 'neural_collaborative_filtering'))
+from performance_config import PerformanceOptimizer, apply_rtx4090_optimizations
+
 
 def setup_logging(log_level: str = "INFO"):
     """Setup logging configuration for training monitoring
@@ -66,17 +70,17 @@ def parse_args():
                        help='Minimum interactions per user (filter cold users)')
     parser.add_argument('--min-seq-length', type=int, default=5,
                        help='Minimum sequence length to include in training')
-    parser.add_argument('--max-seq-length', type=int, default=50,
-                       help='Maximum sequence length (truncation point)')
+    parser.add_argument('--max-seq-length', type=int, default=100,
+                       help='Maximum sequence length (BEAST MODE - longer sequences for better patterns)')
     
     # Model architecture arguments
     parser.add_argument('--model-type', type=str, default='sequential',
                        choices=['sequential', 'attention', 'hierarchical', 'session'],
                        help='Type of sequential model architecture')
-    parser.add_argument('--embedding-dim', type=int, default=128,
-                       help='Item embedding dimension (larger = more capacity)')
-    parser.add_argument('--hidden-dim', type=int, default=256,
-                       help='Hidden dimension for RNN/attention layers')
+    parser.add_argument('--embedding-dim', type=int, default=256,
+                       help='Item embedding dimension (BEAST MODE - larger capacity)')
+    parser.add_argument('--hidden-dim', type=int, default=512,
+                       help='Hidden dimension for RNN/attention layers (BEAST MODE - larger networks)')
     parser.add_argument('--num-layers', type=int, default=2,
                        help='Number of RNN layers (depth of network)')
     parser.add_argument('--num-heads', type=int, default=8,
@@ -95,8 +99,8 @@ def parse_args():
                        help='Data processing type (sequential vs session-based)')
     parser.add_argument('--epochs', type=int, default=50,
                        help='Maximum number of training epochs')
-    parser.add_argument('--batch-size', type=int, default=256,
-                       help='Training batch size (larger = more stable gradients)')
+    parser.add_argument('--batch-size', type=int, default=8192,
+                       help='Training batch size (RTX 4090 BEAST MODE - massive batches for sequential models)')
     parser.add_argument('--learning-rate', type=float, default=0.001,
                        help='Adam optimizer learning rate')
     parser.add_argument('--weight-decay', type=float, default=1e-5,
@@ -108,8 +112,8 @@ def parse_args():
     parser.add_argument('--device', type=str, default='auto',
                        choices=['auto', 'cuda', 'cpu'],
                        help='Device to use')
-    parser.add_argument('--num-workers', type=int, default=4,
-                       help='Number of data loader workers')
+    parser.add_argument('--num-workers', type=int, default=24,
+                       help='Number of data loader workers (Ryzen 9 3900X BEAST MODE - 24 threads)')
     parser.add_argument('--save-dir', type=str, default='./models',
                        help='Directory to save models')
     
@@ -208,6 +212,22 @@ def main():
     
     logger.info(f"Using device: {device}")
     
+    # 🔥🔥🔥 ACTIVATE SEQUENTIAL MODEL BEAST MODE 🔥🔥🔥
+    apply_rtx4090_optimizations()
+    
+    # Get RTX 4090 performance config
+    perf_config = PerformanceOptimizer.get_rtx4090_config()
+    
+    # Override with BEAST MODE settings if using defaults
+    if args.batch_size == 8192:
+        # For sequential models, use slightly smaller batch due to sequence memory
+        args.batch_size = max(4096, perf_config['batch_size'] // 2)
+        logger.info(f"🚀 SEQUENTIAL BEAST MODE batch size: {args.batch_size}")
+    
+    if args.num_workers == 24:
+        args.num_workers = perf_config['num_workers']
+        logger.info(f"💪 BEAST MODE workers: {args.num_workers} threads")
+    
     # Initialize wandb
     if args.use_wandb:
         wandb.init(
@@ -240,6 +260,24 @@ def main():
         # Create model
         model = create_model(args.model_type, model_config, args)
         logger.info(f"Created {args.model_type} model with {sum(p.numel() for p in model.parameters())} parameters")
+        
+        # 🔥 SEQUENTIAL MODEL BEAST MODE OPTIMIZATIONS 🔥
+        model = model.to(device)
+        model = PerformanceOptimizer.optimize_model_for_speed(model)
+        
+        # Find optimal batch size for sequential models on RTX 4090
+        if device == 'cuda':
+            # Sequential models need less batch size due to sequence memory overhead
+            optimal_batch = min(8192, PerformanceOptimizer.get_optimal_batch_size_rtx4090(model, torch.device(device)) // 2)
+            if optimal_batch > args.batch_size:
+                logger.info(f"🚀 Upgrading sequential batch size from {args.batch_size} to {optimal_batch}")
+                args.batch_size = optimal_batch
+                # Recreate data loaders with new batch size
+                train_loader, val_loader, test_loader = data_loader.create_data_loaders(
+                    data_type=args.data_type,
+                    batch_size=args.batch_size,
+                    num_workers=args.num_workers
+                )
         
         # Create trainer
         trainer = SequentialTrainer(
