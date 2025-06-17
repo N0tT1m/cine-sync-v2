@@ -379,11 +379,8 @@ def train_ncf_with_wandb(args):
         logger.info(f"Using device: {device}")
         model = model.to(device)
         
-        # Compile model for performance optimization (if supported)
-        try:
-            model = torch.compile(model)
-        except Exception:
-            pass  # torch.compile not available or failed
+        # Skip model compilation on Windows due to Triton dependency issues
+        # torch.compile requires Triton which has installation issues on Windows
         
         # Setup training components
         criterion = nn.MSELoss()
