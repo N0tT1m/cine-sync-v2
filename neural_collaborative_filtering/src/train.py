@@ -88,8 +88,8 @@ def parse_args():
     # Training hyperparameters
     parser.add_argument('--epochs', type=int, default=50,
                        help='Maximum number of training epochs')
-    parser.add_argument('--batch-size', type=int, default=1024,
-                       help='Training batch size (larger for stable gradients)')
+    parser.add_argument('--batch-size', type=int, default=8192,
+                       help='Training batch size (larger for stable gradients and GPU efficiency)')
     parser.add_argument('--learning-rate', type=float, default=0.001,
                        help='Learning rate for Adam optimizer')
     parser.add_argument('--weight-decay', type=float, default=1e-5,
@@ -101,8 +101,8 @@ def parse_args():
     parser.add_argument('--device', type=str, default='auto',
                        choices=['auto', 'cuda', 'cpu'],
                        help='Device to use for training')
-    parser.add_argument('--num-workers', type=int, default=4,
-                       help='Number of data loader workers')
+    parser.add_argument('--num-workers', type=int, default=16,
+                       help='Number of data loader workers (higher for better CPU utilization)')
     parser.add_argument('--save-dir', type=str, default='./models',
                        help='Directory to save trained models')
     
@@ -266,12 +266,20 @@ def main():
         
         model = model.to(device)
         
+        # GPU memory optimization
+        if device.type == 'cuda':
+            torch.backends.cudnn.benchmark = True  # Optimize CUDA kernels
+            torch.cuda.empty_cache()               # Clear cache
+        
         # Setup training components manually for full control
         criterion = nn.MSELoss()
         optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, mode='min', factor=0.5, patience=5
         )
+        
+        # Mixed precision training for 2x speedup
+        scaler = torch.amp.GradScaler('cuda') if device.type == 'cuda' else None
         
         # Training logger
         training_logger = WandbTrainingLogger(wandb_manager, 'ncf_basic')
@@ -320,22 +328,33 @@ def main():
                 
                 optimizer.zero_grad()
                 
-                # Forward pass
-                predictions = model(user_ids, item_ids)
-                loss = criterion(predictions, ratings)
-                
-                # Backward pass
-                loss.backward()
-                
-                # Gradient clipping
-                grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-                
-                optimizer.step()
+                # Mixed precision forward pass
+                if scaler is not None:
+                    with torch.amp.autocast('cuda'):
+                        predictions = model(user_ids, item_ids)
+                        loss = criterion(predictions, ratings)
+                    
+                    # Mixed precision backward pass
+                    scaler.scale(loss).backward()
+                    
+                    # Gradient clipping with scaler
+                    scaler.unscale_(optimizer)
+                    grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                    
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    # Standard precision fallback
+                    predictions = model(user_ids, item_ids)
+                    loss = criterion(predictions, ratings)
+                    loss.backward()
+                    grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                    optimizer.step()
                 
                 train_losses.append(loss.item())
                 
-                # Log batch metrics every 100 batches
-                if batch_idx % 100 == 0:
+                # Log batch metrics every 1000 batches
+                if batch_idx % 1000 == 0:
                     batch_time = time.time() - batch_start_time
                     batch_metrics = {
                         'batch_time': batch_time,
