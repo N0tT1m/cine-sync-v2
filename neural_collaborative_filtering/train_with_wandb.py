@@ -421,6 +421,16 @@ def train_ncf_with_wandb(args):
             'dataset/num_workers': train_loader.num_workers
         }
         
+        # Setup mixed precision if available
+        scaler = None
+        if device.type == 'cuda':
+            try:
+                from torch.cuda.amp import GradScaler
+                scaler = GradScaler()
+                logger.info("Mixed precision training enabled")
+            except ImportError:
+                logger.warning("Mixed precision not available")
+        
         # Log training configuration
         training_config = {
             'training/optimizer': optimizer.__class__.__name__,
@@ -442,19 +452,6 @@ def train_ncf_with_wandb(args):
         # Setup gradient accumulation
         effective_batch_size = 2048
         accumulation_steps = max(1, effective_batch_size // (args.batch_size if hasattr(args, 'batch_size') else 256))
-        
-        # Setup mixed precision if available
-        scaler = None
-        if device.type == 'cuda':
-            try:
-                from torch.amp import GradScaler
-                scaler = GradScaler('cuda')
-            except ImportError:
-                try:
-                    from torch.cuda.amp import GradScaler
-                    scaler = GradScaler()
-                except ImportError:
-                    pass
         
         # Training loop
         training_start_time = time.time()
