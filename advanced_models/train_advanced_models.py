@@ -7,6 +7,7 @@ RTX 4090 + Ryzen 9 3900X BEAST MODE optimized for maximum performance
 import argparse
 import logging
 import torch
+import wandb
 import sys
 import os
 from pathlib import Path
@@ -86,6 +87,14 @@ def parse_args():
                        help='Device to use')
     parser.add_argument('--save-dir', type=str, default='./advanced_models',
                        help='Directory to save models')
+    
+    # Experiment tracking
+    parser.add_argument('--use-wandb', action='store_true', default=True,
+                       help='Use Weights & Biases (enabled by default)')
+    parser.add_argument('--wandb-project', type=str, default='advanced-models',
+                       help='Wandb project name')
+    parser.add_argument('--experiment-name', type=str, default=None,
+                       help='Experiment name')
     
     return parser.parse_args()
 
@@ -227,6 +236,20 @@ def main():
         device = torch.device(args.device)
     
     logger.info(f"Using device: {device}")
+    
+    # Initialize wandb (enabled by default)
+    from wandb_config import init_wandb_for_training
+    
+    # Initialize W&B manager
+    config = vars(args)
+    wandb_manager = init_wandb_for_training('advanced_models', config)
+    
+    # Also initialize regular wandb for backward compatibility
+    wandb.init(
+        project=args.wandb_project,
+        name=args.experiment_name,
+        config=config
+    )
     
     # 🔥🔥🔥 ACTIVATE ADVANCED MODELS BEAST MODE 🔥🔥🔥
     apply_rtx4090_optimizations()

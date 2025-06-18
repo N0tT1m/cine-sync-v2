@@ -118,8 +118,8 @@ def parse_args():
                        help='Directory to save models')
     
     # Experiment tracking and logging
-    parser.add_argument('--use-wandb', action='store_true',
-                       help='Enable Weights & Biases experiment tracking')
+    parser.add_argument('--use-wandb', action='store_true', default=True,
+                       help='Enable Weights & Biases experiment tracking (enabled by default)')
     parser.add_argument('--wandb-project', type=str, default='sequential-rec',
                        help='WandB project name for organizing experiments')
     parser.add_argument('--experiment-name', type=str, default=None,
@@ -228,23 +228,22 @@ def main():
         args.num_workers = perf_config['num_workers']
         logger.info(f"💪 BEAST MODE workers: {args.num_workers} threads")
     
-    # Initialize wandb
+    # Initialize wandb (enabled by default)
     wandb_manager = None
-    if args.use_wandb:
-        # Import W&B utilities
-        sys.path.append(str(Path(__file__).parent.parent))
-        from wandb_config import init_wandb_for_training
-        
-        # Initialize W&B manager
-        config = vars(args)
-        wandb_manager = init_wandb_for_training('sequential', config)
-        
-        # Also initialize regular wandb for backward compatibility
-        wandb.init(
-            project=args.wandb_project,
-            name=args.experiment_name,
-            config=config
-        )
+    # Import W&B utilities
+    sys.path.append(str(Path(__file__).parent.parent))
+    from wandb_config import init_wandb_for_training
+    
+    # Initialize W&B manager
+    config = vars(args)
+    wandb_manager = init_wandb_for_training('sequential', config)
+    
+    # Also initialize regular wandb for backward compatibility
+    wandb.init(
+        project=args.wandb_project,
+        name=args.experiment_name,
+        config=config
+    )
     
     try:
         # Load and preprocess data with temporal ordering
@@ -341,21 +340,20 @@ def main():
             all_metrics = test_metrics
         
         # Log comprehensive results to Weights & Biases
-        if args.use_wandb:
-            # Use automatic stepping to avoid step conflicts
-            wandb.log(all_metrics, commit=True)                    # Final test metrics
-            
-            # Log training curves for visualization
-            for epoch in range(len(history['train_loss'])):
-                wandb.log({
-                    'epoch': epoch,
-                    'train_loss': history['train_loss'][epoch],
-                    'val_loss': history['val_loss'][epoch] if epoch < len(history['val_loss']) else None,
-                    'learning_rate': history['learning_rate'][epoch] if epoch < len(history['learning_rate']) else None
-                }, commit=False)
-            
-            # Final commit for training history
-            wandb.log({"training_complete": True}, commit=True)
+        # Use automatic stepping to avoid step conflicts
+        wandb.log(all_metrics, commit=True)                    # Final test metrics
+        
+        # Log training curves for visualization
+        for epoch in range(len(history['train_loss'])):
+            wandb.log({
+                'epoch': epoch,
+                'train_loss': history['train_loss'][epoch],
+                'val_loss': history['val_loss'][epoch] if epoch < len(history['val_loss']) else None,
+                'learning_rate': history['learning_rate'][epoch] if epoch < len(history['learning_rate']) else None
+            }, commit=False)
+        
+        # Final commit for training history
+        wandb.log({"training_complete": True}, commit=True)
         
         # Save all artifacts for reproducibility and deployment
         save_path = Path(args.save_dir)
@@ -444,13 +442,11 @@ def main():
         
     except Exception as e:
         logger.error(f"Training failed: {str(e)}")
-        if args.use_wandb:
-            wandb.finish(exit_code=1)
+        wandb.finish(exit_code=1)
         raise
     
     finally:
-        if args.use_wandb:
-            wandb.finish()
+        wandb.finish()
 
 
 if __name__ == "__main__":
