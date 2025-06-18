@@ -61,7 +61,7 @@ class WandbManager:
         self.start_time = None
         self.system_metrics = {}
         
-    def init(self, **kwargs) -> wandb.sdk.wandb_run.Run:
+    def init(self, **kwargs):
         """
         Initialize wandb run with comprehensive configuration
         
