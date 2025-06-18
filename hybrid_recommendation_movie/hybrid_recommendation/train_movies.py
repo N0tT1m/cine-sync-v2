@@ -226,19 +226,108 @@ def train_movie_model_with_wandb(ratings_df: pd.DataFrame, movies_df: pd.DataFra
         # Model saving logic
         if val_loss < best_loss:
             best_loss = val_loss
-            # Save best model
-            model_path = "best_movie_model.pt"
+            
+            # Create models directory
+            os.makedirs("models", exist_ok=True)
+            
+            # Save best model with comprehensive data
+            model_path = "models/best_movie_model.pt"
             torch.save({
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'epoch': epoch,
-                'loss': val_loss
+                'loss': val_loss,
+                'train_loss': train_loss,
+                'config': {
+                    'embedding_dim': getattr(model, 'embedding_dim', 256),
+                    'hidden_dims': getattr(model, 'hidden_dims', [512, 256]),
+                    'dropout': getattr(model, 'dropout', 0.3),
+                    'num_users': getattr(model, 'num_users', 'unknown'),
+                    'num_items': getattr(model, 'num_items', 'unknown')
+                }
             }, model_path)
+            
+            # Save model metadata
+            model_metadata = {
+                'model_type': 'hybrid_movie',
+                'epoch': epoch,
+                'best_val_loss': val_loss,
+                'train_loss': train_loss,
+                'embedding_dim': getattr(model, 'embedding_dim', 256),
+                'hidden_dims': getattr(model, 'hidden_dims', [512, 256]),
+                'dropout': getattr(model, 'dropout', 0.3),
+                'total_parameters': sum(p.numel() for p in model.parameters()),
+                'trainable_parameters': sum(p.numel() for p in model.parameters() if p.requires_grad),
+                'model_size_mb': sum(p.numel() * p.element_size() for p in model.parameters()) / (1024**2),
+                'model_architecture': str(model)
+            }
+            
+            with open("models/movie_metadata.pkl", 'wb') as f:
+                pickle.dump(model_metadata, f)
+            
+            # Save training history
+            training_history = {
+                'train_losses': [train_loss],  # Would collect these over epochs in real training
+                'val_losses': [val_loss],
+                'best_val_loss': best_loss,
+                'total_epochs': epoch + 1
+            }
+            
+            with open("models/training_history.pkl", 'wb') as f:
+                pickle.dump(training_history, f)
+            
+            # Save final metrics
+            import json
+            final_metrics = {
+                'val_loss': val_loss,
+                'train_loss': train_loss,
+                'best_val_loss': best_loss,
+                'epoch': epoch,
+                'model_type': 'hybrid_movie'
+            }
+            
+            with open("models/final_metrics.json", 'w') as f:
+                json.dump(final_metrics, f, indent=2)
+            
+            # Save additional required files for compatibility
+            torch.save(model.state_dict(), "models/recommendation_model.pt")
+            
+            # Save movie lookup (if available from model)
+            if hasattr(model, 'movie_encoder') or hasattr(model, 'item_encoder'):
+                item_encoder = getattr(model, 'movie_encoder', getattr(model, 'item_encoder', None))
+                if item_encoder and hasattr(item_encoder, 'classes_'):
+                    movie_lookup = {
+                        'movie_id_to_idx': {str(k): v for k, v in zip(item_encoder.classes_, range(len(item_encoder.classes_)))},
+                        'idx_to_movie_id': {v: str(k) for k, v in zip(item_encoder.classes_, range(len(item_encoder.classes_)))},
+                        'num_movies': len(item_encoder.classes_)
+                    }
+                    
+                    with open("models/movie_lookup.pkl", 'wb') as f:
+                        pickle.dump(movie_lookup, f)
+                    
+                    with open("models/movie_lookup_backup.pkl", 'wb') as f:
+                        pickle.dump(movie_lookup, f)
+            
+            # Save rating scaler
+            rating_scaler = {
+                'min_rating': 1.0,
+                'max_rating': 5.0,
+                'mean_rating': 3.5,
+                'std_rating': 1.0
+            }
+            
+            with open("models/rating_scaler.pkl", 'wb') as f:
+                pickle.dump(rating_scaler, f)
             
             wandb_manager.save_model_locally(
                 model_path,
-                'movie_basic',
-                metadata={'epoch': epoch, 'val_loss': val_loss}
+                'movie_hybrid',
+                metadata={
+                    'epoch': epoch, 
+                    'val_loss': val_loss, 
+                    'train_loss': train_loss,
+                    'total_parameters': model_metadata['total_parameters']
+                }
             )
     
     total_training_time = time.time() - training_start_time

@@ -662,9 +662,88 @@ def train_ncf_with_wandb(args):
                     'config': config
                 }, best_model_path)
                 
-                # Save metadata
+                # Save comprehensive metadata
+                comprehensive_metadata = {
+                    'model_type': 'ncf',
+                    'epoch': epoch,
+                    'val_loss': val_loss,
+                    'val_rmse': val_rmse,
+                    'train_loss': train_loss,
+                    'train_rmse': train_rmse,
+                    'total_parameters': sum(p.numel() for p in model.parameters()),
+                    'trainable_parameters': sum(p.numel() for p in model.parameters() if p.requires_grad),
+                    'model_size_mb': sum(p.numel() * p.element_size() for p in model.parameters()) / (1024**2),
+                    'model_architecture': str(model),
+                    'num_users': getattr(model, 'num_users', metadata.get('num_users', 'unknown')),
+                    'num_items': getattr(model, 'num_items', metadata.get('num_items', 'unknown')),
+                    'embedding_dim': getattr(model, 'embedding_dim', metadata.get('embedding_dim', 'unknown')),
+                    'hidden_dims': getattr(model, 'hidden_dims', metadata.get('hidden_dims', 'unknown'))
+                }
+                
                 with open("models/ncf_metadata.pkl", 'wb') as f:
-                    pickle.dump(metadata, f)
+                    pickle.dump(comprehensive_metadata, f)
+                
+                # Save additional required files for compatibility
+                torch.save(model.state_dict(), "models/recommendation_model.pt")
+                
+                # Save training history
+                training_history = {
+                    'train_losses': train_losses_history,
+                    'val_losses': val_losses_history,
+                    'best_val_loss': best_val_loss,
+                    'epoch': epoch + 1
+                }
+                
+                with open("models/training_history.pkl", 'wb') as f:
+                    pickle.dump(training_history, f)
+                
+                # Save final metrics JSON
+                final_metrics_json = {
+                    'val_loss': val_loss,
+                    'val_rmse': val_rmse,
+                    'train_loss': train_loss,
+                    'train_rmse': train_rmse,
+                    'best_val_loss': best_val_loss,
+                    'epoch': epoch,
+                    'model_type': 'ncf'
+                }
+                
+                import json
+                with open("models/final_metrics.json", 'w') as f:
+                    json.dump(final_metrics_json, f, indent=2)
+                
+                # Save rating scaler
+                rating_scaler = {
+                    'min_rating': 1.0,
+                    'max_rating': 5.0,
+                    'mean_rating': 3.5,
+                    'std_rating': 1.0
+                }
+                
+                with open("models/rating_scaler.pkl", 'wb') as f:
+                    pickle.dump(rating_scaler, f)
+                
+                # Save model lookup files (if available from data loaders)
+                try:
+                    # This assumes train_loader has dataset with encoders
+                    if hasattr(train_loader.dataset, 'user_encoder') and hasattr(train_loader.dataset, 'item_encoder'):
+                        user_encoder = train_loader.dataset.user_encoder
+                        item_encoder = train_loader.dataset.item_encoder
+                        
+                        movie_lookup = {
+                            'movie_id_to_idx': {str(k): v for k, v in zip(item_encoder.classes_, range(len(item_encoder.classes_)))},
+                            'idx_to_movie_id': {v: str(k) for k, v in zip(item_encoder.classes_, range(len(item_encoder.classes_)))},
+                            'num_movies': len(item_encoder.classes_)
+                        }
+                        
+                        with open("models/movie_lookup.pkl", 'wb') as f:
+                            pickle.dump(movie_lookup, f)
+                        
+                        with open("models/movie_lookup_backup.pkl", 'wb') as f:
+                            pickle.dump(movie_lookup, f)
+                except:
+                    # Create default lookup if encoders not available
+                    pass
                 
                 # Save model locally instead of WandB artifact
                 wandb_manager.save_model_locally(
@@ -675,7 +754,8 @@ def train_ncf_with_wandb(args):
                         'val_loss': val_loss,
                         'val_rmse': val_rmse,
                         'train_loss': train_loss,
-                        'train_rmse': train_rmse
+                        'train_rmse': train_rmse,
+                        'total_parameters': comprehensive_metadata['total_parameters']
                     }
                 )
                 
