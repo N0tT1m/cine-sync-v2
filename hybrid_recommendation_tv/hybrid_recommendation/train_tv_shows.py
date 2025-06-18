@@ -423,7 +423,7 @@ class TVShowTrainer:
                 torch.cuda.empty_cache()
                 gc.collect()
         
-        # Save final model
+        # Save comprehensive final model artifacts
         final_model_path = self.models_dir / "final_tv_model.pt"
         save_tv_model(model, str(final_model_path), {
             'num_users': metadata['num_users'],
@@ -435,19 +435,92 @@ class TVShowTrainer:
             'epochs_trained': epoch + 1
         })
         
+        # Save additional required files for compatibility
+        torch.save(model.state_dict(), self.models_dir / "recommendation_model.pt")
+        
+        # Save comprehensive model metadata
+        comprehensive_metadata = {
+            'model_type': 'hybrid_tv',
+            'num_users': metadata['num_users'],
+            'num_shows': metadata['num_shows'], 
+            'num_genres': metadata['num_genres'],
+            'genre_list': metadata['genre_list'],
+            'embedding_dim': self.embedding_dim,
+            'hidden_dim': self.hidden_dim,
+            'best_val_loss': best_val_loss,
+            'final_val_loss': val_loss,
+            'epochs_trained': epoch + 1,
+            'total_parameters': sum(p.numel() for p in model.parameters()),
+            'trainable_parameters': sum(p.numel() for p in model.parameters() if p.requires_grad),
+            'model_size_mb': sum(p.numel() * p.element_size() for p in model.parameters()) / (1024**2),
+            'model_architecture': str(model)
+        }
+        
+        with open(self.models_dir / "tv_metadata.pkl", 'wb') as f:
+            pickle.dump(comprehensive_metadata, f)
+        
         # Save encoders and metadata for inference
         with open(self.models_dir / "tv_encoders.pkl", 'wb') as f:
             pickle.dump(metadata['encoders'], f)
         
-        with open(self.models_dir / "tv_metadata.pkl", 'wb') as f:
-            pickle.dump({
-                'num_users': metadata['num_users'],
-                'num_shows': metadata['num_shows'], 
-                'num_genres': metadata['num_genres'],
-                'genre_list': metadata['genre_list'],
-                'embedding_dim': self.embedding_dim,
-                'hidden_dim': self.hidden_dim
-            }, f)
+        # Save training history
+        training_history = {
+            'best_val_loss': best_val_loss,
+            'final_val_loss': val_loss,
+            'epochs_trained': epoch + 1
+        }
+        
+        with open(self.models_dir / "training_history.pkl", 'wb') as f:
+            pickle.dump(training_history, f)
+        
+        # Save final metrics JSON
+        final_metrics = {
+            'best_val_loss': best_val_loss,
+            'final_val_loss': val_loss,
+            'epochs_trained': epoch + 1,
+            'model_type': 'hybrid_tv',
+            'total_parameters': comprehensive_metadata['total_parameters']
+        }
+        
+        import json
+        with open(self.models_dir / "final_metrics.json", 'w') as f:
+            json.dump(final_metrics, f, indent=2)
+        
+        # Create TV show lookup files
+        if 'encoders' in metadata and 'show_encoder' in metadata['encoders']:
+            show_encoder = metadata['encoders']['show_encoder']
+            if hasattr(show_encoder, 'classes_'):
+                show_lookup = {
+                    'show_id_to_idx': {str(k): v for k, v in zip(show_encoder.classes_, range(len(show_encoder.classes_)))},
+                    'idx_to_show_id': {v: str(k) for k, v in zip(show_encoder.classes_, range(len(show_encoder.classes_)))},
+                    'num_shows': len(show_encoder.classes_)
+                }
+                
+                # Save as movie_lookup for compatibility
+                with open(self.models_dir / "movie_lookup.pkl", 'wb') as f:
+                    pickle.dump({
+                        'movie_id_to_idx': show_lookup['show_id_to_idx'],
+                        'idx_to_movie_id': show_lookup['idx_to_show_id'],
+                        'num_movies': show_lookup['num_shows']
+                    }, f)
+                
+                with open(self.models_dir / "movie_lookup_backup.pkl", 'wb') as f:
+                    pickle.dump({
+                        'movie_id_to_idx': show_lookup['show_id_to_idx'],
+                        'idx_to_movie_id': show_lookup['idx_to_show_id'],
+                        'num_movies': show_lookup['num_shows']
+                    }, f)
+        
+        # Save rating scaler
+        rating_scaler = {
+            'min_rating': 1.0,
+            'max_rating': 5.0,
+            'mean_rating': 3.5,
+            'std_rating': 1.0
+        }
+        
+        with open(self.models_dir / "rating_scaler.pkl", 'wb') as f:
+            pickle.dump(rating_scaler, f)
         
         logger.info("TV show model training completed!")
         logger.info(f"Best validation loss: {best_val_loss:.4f}")
