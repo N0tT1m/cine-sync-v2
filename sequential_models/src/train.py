@@ -229,11 +229,21 @@ def main():
         logger.info(f"💪 BEAST MODE workers: {args.num_workers} threads")
     
     # Initialize wandb
+    wandb_manager = None
     if args.use_wandb:
+        # Import W&B utilities
+        sys.path.append(str(Path(__file__).parent.parent))
+        from wandb_config import init_wandb_for_training
+        
+        # Initialize W&B manager
+        config = vars(args)
+        wandb_manager = init_wandb_for_training('sequential', config)
+        
+        # Also initialize regular wandb for backward compatibility
         wandb.init(
             project=args.wandb_project,
             name=args.experiment_name,
-            config=vars(args)
+            config=config
         )
     
     try:
@@ -279,12 +289,13 @@ def main():
                     num_workers=args.num_workers
                 )
         
-        # Create trainer
+        # Create trainer with W&B integration
         trainer = SequentialTrainer(
             model=model,
             device=device,
             learning_rate=args.learning_rate,
-            weight_decay=args.weight_decay
+            weight_decay=args.weight_decay,
+            wandb_manager=wandb_manager  # Pass W&B manager for comprehensive logging
         )
         
         # Train model with early stopping and checkpointing
@@ -332,8 +343,19 @@ def main():
         # Log comprehensive results to Weights & Biases
         if args.use_wandb:
             # Use automatic stepping to avoid step conflicts
-            wandb.log(all_metrics)                    # Final test metrics
-            wandb.log({"training_history": history})  # Training curves and progress
+            wandb.log(all_metrics, commit=True)                    # Final test metrics
+            
+            # Log training curves for visualization
+            for epoch in range(len(history['train_loss'])):
+                wandb.log({
+                    'epoch': epoch,
+                    'train_loss': history['train_loss'][epoch],
+                    'val_loss': history['val_loss'][epoch] if epoch < len(history['val_loss']) else None,
+                    'learning_rate': history['learning_rate'][epoch] if epoch < len(history['learning_rate']) else None
+                }, commit=False)
+            
+            # Final commit for training history
+            wandb.log({"training_complete": True}, commit=True)
         
         # Save all artifacts for reproducibility and deployment
         save_path = Path(args.save_dir)

@@ -14,6 +14,14 @@ import time
 from pathlib import Path
 import json
 import math
+import sys
+import os
+
+# Add parent directory to path for W&B imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from wandb_config import WandbManager
+from wandb_training_integration import WandbTrainingLogger
 
 from .model import (
     SequentialRecommender, AttentionalSequentialRecommender,
@@ -36,18 +44,26 @@ class SequentialTrainer:
     """
     
     def __init__(self, model: nn.Module, device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
-                 learning_rate: float = 0.001, weight_decay: float = 1e-5):
+                 learning_rate: float = 0.001, weight_decay: float = 1e-5, 
+                 wandb_manager: Optional[WandbManager] = None):
         """
         Args:
             model: Sequential recommendation model
             device: Device to train on
             learning_rate: Learning rate for optimizer
             weight_decay: L2 regularization weight
+            wandb_manager: Optional W&B manager for logging
         """
         self.model = model.to(device)
         self.device = device
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
+        
+        # W&B integration
+        self.wandb_manager = wandb_manager
+        self.training_logger = None
+        if wandb_manager:
+            self.training_logger = WandbTrainingLogger(wandb_manager, 'sequential')
         
         # Initialize optimizer with Adam (works well for sequential models)
         self.optimizer = optim.Adam(
@@ -65,6 +81,7 @@ class SequentialTrainer:
         self.val_losses = []
         self.val_accuracies = []
         self.val_hit_rates = []
+        self.learning_rates = []
         
         self.logger = logging.getLogger(__name__)
         
@@ -73,13 +90,15 @@ class SequentialTrainer:
         self.best_model_state = None
         self.patience_counter = 0
     
-    def train_epoch(self, train_loader: DataLoader) -> float:
+    def train_epoch(self, train_loader: DataLoader, epoch: int) -> float:
         """Train for one epoch with proper handling of different model types"""
         self.model.train()
         total_loss = 0.0
         num_batches = 0
+        batch_losses = []
+        batch_accuracies = []
         
-        for batch in train_loader:
+        for batch_idx, batch in enumerate(train_loader):
             # Handle different model architectures with their specific input requirements
             if 'short_sequence' in batch:  # Hierarchical model needs both short and long sequences
                 short_sequences = batch['short_sequence'].to(self.device)
@@ -130,8 +149,36 @@ class SequentialTrainer:
             
             self.optimizer.step()
             
-            total_loss += loss.item()
+            batch_loss = loss.item()
+            total_loss += batch_loss
             num_batches += 1
+            batch_losses.append(batch_loss)
+            
+            # Calculate batch accuracy for logging
+            if 'short_sequence' in batch:
+                _, predicted = torch.max(logits, 1)
+                accuracy = (predicted == targets).float().mean().item()
+            else:
+                if isinstance(self.model, AttentionalSequentialRecommender):
+                    _, predicted = torch.max(final_logits, 1)
+                    accuracy = (predicted == targets).float().mean().item()
+                else:
+                    _, predicted = torch.max(final_logits, 1)
+                    accuracy = (predicted == targets).float().mean().item()
+            
+            batch_accuracies.append(accuracy)
+            
+            # Log batch metrics to W&B
+            if self.training_logger and batch_idx % 50 == 0:  # Log every 50 batches
+                additional_metrics = {
+                    'accuracy': accuracy,
+                    'batch_loss': batch_loss,
+                    'learning_rate': self.optimizer.param_groups[0]['lr']
+                }
+                self.training_logger.log_batch(
+                    epoch, batch_idx, len(train_loader),
+                    batch_loss, targets.size(0), additional_metrics
+                )
         
         return total_loss / num_batches
     
@@ -232,8 +279,13 @@ class SequentialTrainer:
         for epoch in range(epochs):
             start_time = time.time()
             
+            # Log epoch start to W&B
+            if self.training_logger:
+                current_lr = self.optimizer.param_groups[0]['lr']
+                self.training_logger.log_epoch_start(epoch, epochs, current_lr)
+            
             # Train for one epoch
-            train_loss = self.train_epoch(train_loader)
+            train_loss = self.train_epoch(train_loader, epoch)
             
             # Evaluate on validation set
             val_metrics = self.evaluate(val_loader)
@@ -242,10 +294,38 @@ class SequentialTrainer:
             self.train_losses.append(train_loss)
             self.val_losses.append(val_metrics['loss'])
             self.val_accuracies.append(val_metrics['accuracy'])
+            self.learning_rates.append(self.optimizer.param_groups[0]['lr'])
             if 'hit_rate@10' in val_metrics:
                 self.val_hit_rates.append(val_metrics['hit_rate@10'])
             
             epoch_time = time.time() - start_time
+            
+            # Log epoch end to W&B
+            if self.training_logger:
+                train_metrics = {'accuracy': val_metrics['accuracy']}  # We'll use val accuracy as approx
+                val_metrics_formatted = {k: v for k, v in val_metrics.items() if k != 'loss'}
+                self.training_logger.log_epoch_end(
+                    epoch, train_loss, val_metrics['loss'], 
+                    train_metrics, val_metrics_formatted
+                )
+            
+            # Log detailed validation metrics to W&B
+            if self.wandb_manager:
+                detailed_metrics = {
+                    f'epoch': epoch,
+                    f'train_loss': train_loss,
+                    f'val_loss': val_metrics['loss'],
+                    f'val_accuracy': val_metrics['accuracy'],
+                    f'learning_rate': self.optimizer.param_groups[0]['lr'],
+                    f'epoch_time_sec': epoch_time
+                }
+                
+                # Add hit rates
+                for k, v in val_metrics.items():
+                    if 'hit_rate' in k:
+                        detailed_metrics[f'val_{k}'] = v
+                
+                self.wandb_manager.log_metrics(detailed_metrics, commit=True)
             
             # Log progress
             self.logger.info(
@@ -283,10 +363,11 @@ class SequentialTrainer:
             self._save_training_history(save_path / 'training_history.json')
         
         return {
-            'train_losses': self.train_losses,
-            'val_losses': self.val_losses,
-            'val_accuracies': self.val_accuracies,
-            'val_hit_rates': self.val_hit_rates
+            'train_loss': self.train_losses,
+            'val_loss': self.val_losses,
+            'val_accuracy': self.val_accuracies,
+            'val_hit_rates': self.val_hit_rates,
+            'learning_rate': self.learning_rates
         }
     
     def _save_checkpoint(self, filepath: Path, epoch: int, metrics: Dict[str, float]):
