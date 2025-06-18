@@ -13,8 +13,22 @@ import logging
 import time
 from pathlib import Path
 import json
+import math
+import sys
+import os
 import faiss  # Facebook AI Similarity Search for efficient vector retrieval
 from sklearn.metrics import roc_auc_score, precision_recall_curve, auc
+
+# Add parent directory to path for W&B imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+try:
+    from wandb_config import WandbManager
+    from wandb_training_integration import WandbTrainingLogger
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
 
 from .model import (
     TwoTowerModel, EnhancedTwoTowerModel, 
@@ -35,18 +49,26 @@ class TwoTowerTrainer:
     """
     
     def __init__(self, model: nn.Module, device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
-                 learning_rate: float = 0.001, weight_decay: float = 1e-5):
+                 learning_rate: float = 0.001, weight_decay: float = 1e-5, 
+                 wandb_manager: Optional[WandbManager] = None):
         """
         Args:
             model: Two-Tower model to train
             device: Device to train on
             learning_rate: Learning rate for optimizer
             weight_decay: L2 regularization weight
+            wandb_manager: Optional W&B manager for logging
         """
         self.model = model.to(device)
         self.device = device
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
+        
+        # W&B integration
+        self.wandb_manager = wandb_manager
+        self.training_logger = None
+        if wandb_manager and WANDB_AVAILABLE:
+            self.training_logger = WandbTrainingLogger(wandb_manager, 'two_tower')
         
         # Initialize optimizer
         self.optimizer = optim.Adam(
@@ -246,6 +268,11 @@ class TwoTowerTrainer:
         for epoch in range(epochs):
             start_time = time.time()
             
+            # Log epoch start to W&B
+            if self.training_logger:
+                current_lr = self.optimizer.param_groups[0]['lr']
+                self.training_logger.log_epoch_start(epoch, epochs, current_lr)
+            
             # Train for one epoch
             train_loss = self.train_epoch(train_loader)
             
@@ -258,6 +285,82 @@ class TwoTowerTrainer:
             self.val_metrics.append(val_metrics)
             
             epoch_time = time.time() - start_time
+            
+            # Log comprehensive metrics to W&B
+            if self.wandb_manager and WANDB_AVAILABLE:
+                # Get model parameters stats
+                total_params = sum(p.numel() for p in self.model.parameters())
+                trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+                
+                # Calculate gradient norm
+                grad_norm = 0
+                for p in self.model.parameters():
+                    if p.grad is not None:
+                        grad_norm += p.grad.data.norm(2).item() ** 2
+                grad_norm = math.sqrt(grad_norm)
+                
+                # Memory usage
+                if torch.cuda.is_available():
+                    memory_allocated = torch.cuda.memory_allocated() / 1024**3  # GB
+                    memory_cached = torch.cuda.memory_reserved() / 1024**3  # GB
+                else:
+                    memory_allocated = 0
+                    memory_cached = 0
+                
+                detailed_metrics = {
+                    'epoch': epoch,
+                    'train_loss': train_loss,
+                    'learning_rate': self.optimizer.param_groups[0]['lr'],
+                    'epoch_time_sec': epoch_time,
+                    'gradient_norm': grad_norm,
+                    'total_parameters': total_params,
+                    'trainable_parameters': trainable_params,
+                    'gpu_memory_allocated_gb': memory_allocated,
+                    'gpu_memory_cached_gb': memory_cached,
+                    'batches_per_epoch': len(train_loader),
+                    'samples_per_epoch': len(train_loader.dataset),
+                    'avg_batch_time_ms': (epoch_time / len(train_loader)) * 1000,
+                    'patience_counter': self.patience_counter,
+                    'best_val_loss': self.best_val_loss
+                }
+                
+                # Add all validation metrics
+                for k, v in val_metrics.items():
+                    detailed_metrics[f'val_{k}'] = v
+                
+                # Add embedding analysis if possible
+                if hasattr(self.model, 'user_tower') and hasattr(self.model, 'item_tower'):
+                    # Calculate tower similarity statistics
+                    try:
+                        with torch.no_grad():
+                            # Sample some data for embedding analysis
+                            sample_batch = next(iter(train_loader))
+                            if 'user_features' in sample_batch and 'item_features' in sample_batch:
+                                user_features = sample_batch['user_features'][:100].to(self.device)
+                                item_features = sample_batch['item_features'][:100].to(self.device)
+                                
+                                user_embeddings = self.model.user_tower(user_features)
+                                item_embeddings = self.model.item_tower(item_features)
+                                
+                                # Calculate embedding statistics
+                                user_emb_norm = torch.norm(user_embeddings, dim=1).mean().item()
+                                item_emb_norm = torch.norm(item_embeddings, dim=1).mean().item()
+                                
+                                detailed_metrics['user_embedding_norm'] = user_emb_norm
+                                detailed_metrics['item_embedding_norm'] = item_emb_norm
+                    except:
+                        pass  # Skip embedding analysis if it fails
+                
+                self.wandb_manager.log_metrics(detailed_metrics, commit=True)
+            
+            # Log epoch end to training logger
+            if self.training_logger:
+                train_metrics = {}  # Two-tower doesn't have train accuracy by default
+                val_metrics_formatted = {k: v for k, v in val_metrics.items() if k != 'loss'}
+                self.training_logger.log_epoch_end(
+                    epoch, train_loss, val_metrics['loss'], 
+                    train_metrics, val_metrics_formatted
+                )
             
             # Log progress
             metrics_str = " | ".join([f"{k}: {v:.4f}" for k, v in val_metrics.items()])

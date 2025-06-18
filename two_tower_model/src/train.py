@@ -110,8 +110,8 @@ def parse_args():
                        help='Directory to save models')
     
     # Experiment tracking
-    parser.add_argument('--use-wandb', action='store_true',
-                       help='Use Weights & Biases')
+    parser.add_argument('--use-wandb', action='store_true', default=True,
+                       help='Use Weights & Biases (enabled by default)')
     parser.add_argument('--wandb-project', type=str, default='two-tower-rec',
                        help='Wandb project name')
     parser.add_argument('--experiment-name', type=str, default=None,
@@ -236,13 +236,21 @@ def main():
         args.num_workers = perf_config['num_workers']
         logger.info(f"💪 BEAST MODE workers: {args.num_workers} threads")
     
-    # Initialize wandb
-    if args.use_wandb:
-        wandb.init(
-            project=args.wandb_project,
-            name=args.experiment_name,
-            config=vars(args)
-        )
+    # Initialize wandb (enabled by default)
+    # Import W&B utilities
+    sys.path.append(str(Path(__file__).parent.parent))
+    from wandb_config import init_wandb_for_training
+    
+    # Initialize W&B manager
+    config = vars(args)
+    wandb_manager = init_wandb_for_training('two_tower', config)
+    
+    # Also initialize regular wandb for backward compatibility
+    wandb.init(
+        project=args.wandb_project,
+        name=args.experiment_name,
+        config=config
+    )
     
     try:
         # Load and preprocess data with comprehensive feature engineering
@@ -285,12 +293,13 @@ def main():
                     model_type=args.model_type
                 )
         
-        # Create trainer
+        # Create trainer with W&B integration
         trainer = TwoTowerTrainer(
             model=model,
             device=device,
             learning_rate=args.learning_rate,
-            weight_decay=args.weight_decay
+            weight_decay=args.weight_decay,
+            wandb_manager=wandb_manager
         )
         
         # Train model with early stopping and checkpointing
@@ -341,11 +350,22 @@ def main():
         else:
             all_metrics = test_metrics
         
-        # Log to wandb
-        if args.use_wandb:
-            # Use automatic stepping to avoid step conflicts
-            wandb.log(all_metrics)
-            wandb.log({"training_history": history})
+        # Log comprehensive results to wandb
+        # Use automatic stepping to avoid step conflicts
+        wandb.log(all_metrics)
+        wandb.log({"training_history": history})
+        
+        # Log training curves for visualization
+        for epoch in range(len(history['train_loss'])):
+            wandb.log({
+                'epoch': epoch,
+                'train_loss': history['train_loss'][epoch],
+                'val_loss': history['val_loss'][epoch] if epoch < len(history['val_loss']) else None,
+                'learning_rate': history['learning_rate'][epoch] if epoch < len(history['learning_rate']) else None
+            }, commit=False)
+        
+        # Final commit for training history
+        wandb.log({"training_complete": True}, commit=True)
         
         # Save all artifacts for reproducibility and deployment
         save_path = Path(args.save_dir)

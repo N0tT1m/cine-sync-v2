@@ -180,6 +180,8 @@ class SequentialTrainer:
                     batch_loss, targets.size(0), additional_metrics
                 )
         
+        # Store batch accuracies for epoch-level logging
+        self.batch_accuracies = batch_accuracies
         return total_loss / num_batches
     
     def evaluate(self, val_loader: DataLoader, k_values: List[int] = [5, 10, 20]) -> Dict[str, float]:
@@ -311,19 +313,55 @@ class SequentialTrainer:
             
             # Log detailed validation metrics to W&B
             if self.wandb_manager:
+                # Calculate additional training metrics
+                train_accuracy = sum(batch_accuracies) / len(batch_accuracies) if hasattr(self, 'batch_accuracies') else 0
+                
+                # Get model parameters stats
+                total_params = sum(p.numel() for p in self.model.parameters())
+                trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+                
+                # Calculate gradient norm
+                grad_norm = 0
+                for p in self.model.parameters():
+                    if p.grad is not None:
+                        grad_norm += p.grad.data.norm(2).item() ** 2
+                grad_norm = math.sqrt(grad_norm)
+                
+                # Memory usage
+                if torch.cuda.is_available():
+                    memory_allocated = torch.cuda.memory_allocated() / 1024**3  # GB
+                    memory_cached = torch.cuda.memory_reserved() / 1024**3  # GB
+                else:
+                    memory_allocated = 0
+                    memory_cached = 0
+                
                 detailed_metrics = {
-                    f'epoch': epoch,
-                    f'train_loss': train_loss,
-                    f'val_loss': val_metrics['loss'],
-                    f'val_accuracy': val_metrics['accuracy'],
-                    f'learning_rate': self.optimizer.param_groups[0]['lr'],
-                    f'epoch_time_sec': epoch_time
+                    'epoch': epoch,
+                    'train_loss': train_loss,
+                    'train_accuracy': train_accuracy,
+                    'val_loss': val_metrics['loss'],
+                    'val_accuracy': val_metrics['accuracy'],
+                    'learning_rate': self.optimizer.param_groups[0]['lr'],
+                    'epoch_time_sec': epoch_time,
+                    'gradient_norm': grad_norm,
+                    'total_parameters': total_params,
+                    'trainable_parameters': trainable_params,
+                    'gpu_memory_allocated_gb': memory_allocated,
+                    'gpu_memory_cached_gb': memory_cached,
+                    'batches_per_epoch': len(train_loader),
+                    'samples_per_epoch': len(train_loader.dataset),
+                    'avg_batch_time_ms': (epoch_time / len(train_loader)) * 1000,
+                    'patience_counter': self.patience_counter,
+                    'best_val_loss': self.best_val_loss
                 }
                 
-                # Add hit rates
+                # Add all validation metrics
                 for k, v in val_metrics.items():
-                    if 'hit_rate' in k:
-                        detailed_metrics[f'val_{k}'] = v
+                    detailed_metrics[f'val_{k}'] = v
+                
+                # Add perplexity if using cross-entropy loss
+                detailed_metrics['train_perplexity'] = math.exp(min(train_loss, 10))  # Cap to prevent overflow
+                detailed_metrics['val_perplexity'] = math.exp(min(val_metrics['loss'], 10))
                 
                 self.wandb_manager.log_metrics(detailed_metrics, commit=True)
             
