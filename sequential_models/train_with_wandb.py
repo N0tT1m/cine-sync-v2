@@ -130,7 +130,7 @@ class AttentionalSequentialRecommender(nn.Module):
             for _ in range(num_layers)
         ])
         
-        # Output projection
+        # Output projection (should match embedding vocab size minus padding)
         self.output_projection = nn.Linear(embedding_dim, num_items)
         
         # Dropout
@@ -343,9 +343,9 @@ def prepare_sequential_data(ratings_path, min_interactions=20, min_seq_length=5,
             # Use sliding window approach with maximum sequence length
             seq_start = max(0, i - max_seq_length)
             seq = items[seq_start:i]
-            target = items[i]
+            target = items[i] - 1  # Adjust target back to 0-based indexing for output layer
             
-            if len(seq) >= min_seq_length:
+            if len(seq) >= min_seq_length and target >= 0:  # Ensure valid target
                 user_sequences.append(seq)
                 user_targets.append(target)
                 
@@ -492,8 +492,11 @@ def train_sequential_with_wandb(args):
             wandb_manager.log_dataset_info(metadata)
         
         # Create model
+        num_items = metadata['num_items']
+        print(f"Creating model with {num_items} items")
+        
         model = AttentionalSequentialRecommender(
-            num_items=metadata['num_items'],
+            num_items=num_items,
             embedding_dim=args.embedding_dim,
             num_heads=args.num_heads,
             num_layers=args.num_layers,
@@ -501,6 +504,23 @@ def train_sequential_with_wandb(args):
             max_seq_len=args.max_seq_length,
             dropout=args.dropout
         )
+        
+        # Validate data ranges
+        print("Validating data ranges...")
+        sample_batch = next(iter(train_loader))
+        sequences, targets = sample_batch
+        print(f"Sequence range: {sequences.min().item()} to {sequences.max().item()}")
+        print(f"Target range: {targets.min().item()} to {targets.max().item()}")
+        print(f"Expected sequence range: 0 to {num_items}")
+        print(f"Expected target range: 0 to {num_items - 1}")
+        
+        # Check for any out-of-bounds indices
+        if sequences.max().item() > num_items:
+            raise ValueError(f"Sequence contains index {sequences.max().item()} > {num_items}")
+        if targets.max().item() >= num_items:
+            raise ValueError(f"Target contains index {targets.max().item()} >= {num_items}")
+        if targets.min().item() < 0:
+            raise ValueError(f"Target contains negative index {targets.min().item()}")
         
         # Log model architecture
         if wandb_manager:
@@ -511,6 +531,14 @@ def train_sequential_with_wandb(args):
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         else:
             device = torch.device(args.device)
+        
+        print(f"Using device: {device}")
+        
+        # Enable CUDA debugging if using CUDA
+        if device.type == 'cuda':
+            import os
+            os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+            print("CUDA debugging enabled")
         
         model = model.to(device)
         
@@ -539,14 +567,34 @@ def train_sequential_with_wandb(args):
             train_accuracies = []
             
             for batch_idx, (sequences, targets) in enumerate(train_loader):
-                sequences = sequences.to(device)
-                targets = targets.to(device).squeeze()
-                
-                optimizer.zero_grad()
-                
-                logits = model(sequences)
-                loss = criterion(logits, targets)
-                loss.backward()
+                try:
+                    sequences = sequences.to(device)
+                    targets = targets.to(device).squeeze()
+                    
+                    # Debug: Check for invalid indices in first few batches
+                    if batch_idx < 3:
+                        seq_max = sequences.max().item()
+                        seq_min = sequences.min().item()
+                        tgt_max = targets.max().item()
+                        tgt_min = targets.min().item()
+                        print(f"Batch {batch_idx}: seq [{seq_min}, {seq_max}], tgt [{tgt_min}, {tgt_max}]")
+                        
+                        if seq_max > num_items or tgt_max >= num_items or tgt_min < 0:
+                            print(f"ERROR: Invalid indices detected in batch {batch_idx}")
+                            print(f"Sequences shape: {sequences.shape}, Targets shape: {targets.shape}")
+                            continue
+                    
+                    optimizer.zero_grad()
+                    
+                    logits = model(sequences)
+                    loss = criterion(logits, targets)
+                    loss.backward()
+                    
+                except RuntimeError as e:
+                    print(f"CUDA error in batch {batch_idx}: {e}")
+                    print(f"Sequences shape: {sequences.shape}, range: [{sequences.min().item()}, {sequences.max().item()}]")
+                    print(f"Targets shape: {targets.shape}, range: [{targets.min().item()}, {targets.max().item()}]")
+                    raise
                 
                 # Gradient clipping
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
