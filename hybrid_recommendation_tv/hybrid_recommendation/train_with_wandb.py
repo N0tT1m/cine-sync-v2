@@ -207,12 +207,20 @@ def parse_args():
     return parser.parse_args()
 
 
-def load_ratings_chunked(filepath, chunk_size=100000):
+def load_ratings_chunked(filepath, chunk_size=10000):
     """Load large ratings file in chunks to prevent memory issues"""
     chunks = []
-    for chunk in pd.read_csv(filepath, chunksize=chunk_size):
-        chunks.append(chunk)
-    return pd.concat(chunks, ignore_index=True)
+    try:
+        for i, chunk in enumerate(pd.read_csv(filepath, chunksize=chunk_size)):
+            chunks.append(chunk)
+            # Clear memory every 50 chunks
+            if i % 50 == 0 and i > 0:
+                temp_df = pd.concat(chunks, ignore_index=True)
+                chunks = [temp_df]
+        return pd.concat(chunks, ignore_index=True)
+    except pd.errors.ParserError as e:
+        # If chunked loading fails, try loading with reduced memory usage
+        return pd.read_csv(filepath, low_memory=False, dtype={'userId': 'int32', 'movieId': 'int32', 'rating': 'float32'})
 
 
 def prepare_data(ratings_path, movies_path, test_size=0.2, val_size=0.1):
@@ -225,10 +233,10 @@ def prepare_data(ratings_path, movies_path, test_size=0.2, val_size=0.1):
     # Load data with chunked loading for large files
     file_size = os.path.getsize(ratings_path) / (1024 * 1024)  # Size in MB
     
-    if file_size > 500:  # Use chunked loading for files > 500MB
-        ratings_df = load_ratings_chunked(ratings_path, chunk_size=50000)
+    if file_size > 100:  # Use chunked loading for files > 100MB
+        ratings_df = load_ratings_chunked(ratings_path, chunk_size=5000)
     else:
-        ratings_df = pd.read_csv(ratings_path)
+        ratings_df = pd.read_csv(ratings_path, dtype={'userId': 'int32', 'movieId': 'int32', 'rating': 'float32'})
         
     movies_df = pd.read_csv(movies_path)
     
@@ -261,33 +269,39 @@ def prepare_data(ratings_path, movies_path, test_size=0.2, val_size=0.1):
     val_dataset = MovieDataset(val_df)
     test_dataset = MovieDataset(test_df)
     
-    # Create optimized data loaders for Ryzen 3900X (12C/24T)
+    # Create optimized data loaders for Windows + Ryzen 9 3900X + RTX 4090
+    import platform
+    is_windows = platform.system() == 'Windows'
+    
     train_loader = DataLoader(
         train_dataset, 
-        batch_size=512,  # Larger batch for better GPU utilization
+        batch_size=1024,  # RTX 4090 can handle larger batches
         shuffle=True, 
-        num_workers=12,  # Use physical cores (3900X has 12 cores)
-        pin_memory=True,  # Faster GPU transfer
-        persistent_workers=True,  # Avoid recreation overhead
-        prefetch_factor=2  # Pipeline optimization
+        num_workers=8 if is_windows else 12,  # 8 workers for Windows (12C/24T Ryzen 9 3900X)
+        pin_memory=True,  # RTX 4090 benefits from pinned memory
+        persistent_workers=False if is_windows else True,  # Disable for Windows
+        prefetch_factor=1 if is_windows else 2,  # Reduced prefetch for Windows
+        multiprocessing_context='spawn' if is_windows else None  # Windows-safe multiprocessing
     )
     val_loader = DataLoader(
         val_dataset, 
-        batch_size=1024,  # Larger batch for validation
+        batch_size=2048,  # Larger validation batch for RTX 4090
         shuffle=False, 
-        num_workers=8, 
+        num_workers=6 if is_windows else 8,  # 6 workers for validation on Windows
         pin_memory=True,
-        persistent_workers=True,
-        prefetch_factor=2
+        persistent_workers=False if is_windows else True,
+        prefetch_factor=1 if is_windows else 2,
+        multiprocessing_context='spawn' if is_windows else None
     )
     test_loader = DataLoader(
         test_dataset, 
-        batch_size=1024, 
+        batch_size=2048, 
         shuffle=False, 
-        num_workers=8,
+        num_workers=4 if is_windows else 8,
         pin_memory=True,
-        persistent_workers=True,
-        prefetch_factor=2
+        persistent_workers=False if is_windows else True,
+        prefetch_factor=1 if is_windows else 2,
+        multiprocessing_context='spawn' if is_windows else None
     )
     
     # Metadata
