@@ -287,14 +287,22 @@ def prepare_sequential_data(ratings_path, min_interactions=20, min_seq_length=5,
     
     # Load ratings with chunked loading for large files
     file_size = os.path.getsize(ratings_path) / (1024 * 1024)  # Size in MB
+    print(f"Dataset size: {file_size:.1f} MB")
     
-    if file_size > 500:  # Use chunked loading for files > 500MB
+    if file_size > 200:  # Use chunked loading for files > 200MB
+        print("Using chunked loading for large dataset...")
         chunks = []
-        for chunk in pd.read_csv(ratings_path, chunksize=50000):
+        chunk_size = 25000  # Smaller chunks to manage memory
+        for i, chunk in enumerate(pd.read_csv(ratings_path, chunksize=chunk_size)):
             chunks.append(chunk)
+            if i % 10 == 0:
+                print(f"Loaded chunk {i + 1}...")
         ratings_df = pd.concat(chunks, ignore_index=True)
+        del chunks  # Free memory
     else:
         ratings_df = pd.read_csv(ratings_path)
+    
+    print(f"Loaded {len(ratings_df)} ratings")
     
     # Sort by user and timestamp
     ratings_df = ratings_df.sort_values(['userId', 'timestamp'])
@@ -309,21 +317,43 @@ def prepare_sequential_data(ratings_path, min_interactions=20, min_seq_length=5,
     item_encoder = LabelEncoder()
     ratings_df['item_idx'] = item_encoder.fit_transform(ratings_df['movieId']) + 1  # +1 for padding
     
-    # Group by user to create sequences
+    # Group by user to create sequences (memory-efficient)
     user_sequences = []
     user_targets = []
+    max_sequences_per_user = 5  # Further limit sequences per user to prevent memory explosion
     
-    for user_id, group in ratings_df.groupby('userId'):
+    grouped = list(ratings_df.groupby('userId'))
+    total_users = len(grouped)
+    print(f"Processing {total_users} users for sequence generation...")
+    
+    for idx, (user_id, group) in enumerate(grouped):
+        if idx % 1000 == 0:
+            print(f"Processed {idx}/{total_users} users, generated {len(user_sequences)} sequences so far")
+            
         items = group['item_idx'].tolist()
         
-        # Create sequences of varying lengths
-        for i in range(min_seq_length, len(items)):
-            seq = items[:i]
+        if len(items) < min_seq_length + 1:
+            continue
+            
+        # Create fewer sequences per user to manage memory
+        # Use only the last few sequences (most recent behavior)
+        start_idx = max(min_seq_length, len(items) - max_sequences_per_user)
+        
+        for i in range(start_idx, len(items)):
+            # Use sliding window approach with maximum sequence length
+            seq_start = max(0, i - max_seq_length)
+            seq = items[seq_start:i]
             target = items[i]
             
             if len(seq) >= min_seq_length:
                 user_sequences.append(seq)
                 user_targets.append(target)
+                
+        # Clear items list to free memory
+        del items
+    
+    print(f"Generated {len(user_sequences)} total sequences")
+    del grouped  # Free memory
     
     
     # Split data
@@ -340,33 +370,30 @@ def prepare_sequential_data(ratings_path, min_interactions=20, min_seq_length=5,
     val_dataset = SequentialDataset(val_seq, val_targets, max_seq_length)
     test_dataset = SequentialDataset(test_seq, test_targets, max_seq_length)
     
-    # Create optimized data loaders for Ryzen 3900X
+    # Create memory-efficient data loaders
     train_loader = DataLoader(
         train_dataset, 
-        batch_size=256,  # Moderate batch for sequential complexity
+        batch_size=128,  # Smaller batch for memory efficiency
         shuffle=True, 
-        num_workers=12,
-        pin_memory=True,
-        persistent_workers=True,
-        prefetch_factor=2
+        num_workers=4,   # Fewer workers to reduce memory overhead
+        pin_memory=False,  # Disable pin_memory to save GPU memory
+        persistent_workers=False
     )
     val_loader = DataLoader(
         val_dataset, 
-        batch_size=512,
+        batch_size=256,  # Smaller validation batch
         shuffle=False, 
-        num_workers=8,
-        pin_memory=True,
-        persistent_workers=True,
-        prefetch_factor=2
+        num_workers=4,
+        pin_memory=False,
+        persistent_workers=False
     )
     test_loader = DataLoader(
         test_dataset, 
-        batch_size=512,
+        batch_size=256,
         shuffle=False, 
-        num_workers=8,
-        pin_memory=True,
-        persistent_workers=True,
-        prefetch_factor=2
+        num_workers=4,
+        pin_memory=False,
+        persistent_workers=False
     )
     
     # Metadata
@@ -429,24 +456,30 @@ def train_sequential_with_wandb(args):
         'ratings_path': args.ratings_path
     }
     
-    # Initialize wandb
-    wandb_manager = init_wandb_for_training(
-        'sequential', 
-        config,
-        resume=False
-    )
+    # Initialize wandb with error handling
+    try:
+        wandb_manager = init_wandb_for_training(
+            'sequential', 
+            config,
+            resume=False
+        )
+    except Exception as e:
+        print(f"Warning: Failed to initialize W&B: {e}")
+        print("Continuing training without W&B logging...")
+        wandb_manager = None
     
-    # Override wandb config if provided
-    if args.wandb_project:
-        wandb_manager.config.project = args.wandb_project
-    if args.wandb_entity:
-        wandb_manager.config.entity = args.wandb_entity
-    if args.wandb_name:
-        wandb_manager.config.name = args.wandb_name
-    if args.wandb_tags:
-        wandb_manager.config.tags = args.wandb_tags
-    if args.wandb_offline:
-        wandb_manager.config.mode = 'offline'
+    # Override wandb config if provided and wandb_manager exists
+    if wandb_manager:
+        if args.wandb_project:
+            wandb_manager.config.project = args.wandb_project
+        if args.wandb_entity:
+            wandb_manager.config.entity = args.wandb_entity
+        if args.wandb_name:
+            wandb_manager.config.name = args.wandb_name
+        if args.wandb_tags:
+            wandb_manager.config.tags = args.wandb_tags
+        if args.wandb_offline:
+            wandb_manager.config.mode = 'offline'
     
     try:
         # Prepare data
@@ -455,7 +488,8 @@ def train_sequential_with_wandb(args):
         )
         
         # Log dataset information
-        wandb_manager.log_dataset_info(metadata)
+        if wandb_manager:
+            wandb_manager.log_dataset_info(metadata)
         
         # Create model
         model = AttentionalSequentialRecommender(
@@ -469,7 +503,8 @@ def train_sequential_with_wandb(args):
         )
         
         # Log model architecture
-        wandb_manager.log_model_architecture(model, 'sequential')
+        if wandb_manager:
+            wandb_manager.log_model_architecture(model, 'sequential')
         
         # Setup device
         if args.device == 'auto':
@@ -487,7 +522,7 @@ def train_sequential_with_wandb(args):
         scheduler = WarmupScheduler(optimizer, args.embedding_dim, args.warmup_steps)
         
         # Training logger
-        training_logger = WandbTrainingLogger(wandb_manager, 'sequential')
+        training_logger = WandbTrainingLogger(wandb_manager, 'sequential') if wandb_manager else None
         
         # Training loop
         best_val_loss = float('inf')
@@ -663,8 +698,20 @@ def train_sequential_with_wandb(args):
         logger.error(f"Training failed: {e}")
         raise
     finally:
-        # Always finish wandb run
-        wandb_manager.finish()
+        # Always finish wandb run with error handling
+        if wandb_manager:
+            try:
+                wandb_manager.finish()
+            except Exception as e:
+                print(f"Warning: Failed to finish W&B run: {e}")
+        
+        # Also try to finish regular wandb
+        try:
+            import wandb
+            if wandb.run is not None:
+                wandb.finish()
+        except Exception as e:
+            print(f"Warning: Failed to finish regular wandb: {e}")
 
 
 def main():
