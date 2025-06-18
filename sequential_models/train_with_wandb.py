@@ -529,10 +529,14 @@ def train_sequential_with_wandb(args):
                 
                 # Log batch metrics
                 if batch_idx % 50 == 0:
+                    # Calculate gradient norm before clipping for monitoring
+                    grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), float('inf')).item()
+                    
                     additional_metrics = {
                         'accuracy': accuracy,
                         'perplexity': torch.exp(loss).item(),
-                        'gradient_norm': torch.nn.utils.clip_grad_norm_(model.parameters(), float('inf')).item()
+                        'gradient_norm': grad_norm,
+                        'learning_rate': scheduler.optimizer.param_groups[0]['lr']
                     }
                     
                     training_logger.log_batch(
