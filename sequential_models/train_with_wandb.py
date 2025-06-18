@@ -287,22 +287,16 @@ def prepare_sequential_data(ratings_path, min_interactions=20, min_seq_length=5,
     
     # Load ratings with chunked loading for large files
     file_size = os.path.getsize(ratings_path) / (1024 * 1024)  # Size in MB
-    print(f"Dataset size: {file_size:.1f} MB")
     
     if file_size > 200:  # Use chunked loading for files > 200MB
-        print("Using chunked loading for large dataset...")
         chunks = []
         chunk_size = 25000  # Smaller chunks to manage memory
         for i, chunk in enumerate(pd.read_csv(ratings_path, chunksize=chunk_size)):
             chunks.append(chunk)
-            if i % 10 == 0:
-                print(f"Loaded chunk {i + 1}...")
         ratings_df = pd.concat(chunks, ignore_index=True)
         del chunks  # Free memory
     else:
         ratings_df = pd.read_csv(ratings_path)
-    
-    print(f"Loaded {len(ratings_df)} ratings")
     
     # Sort by user and timestamp
     ratings_df = ratings_df.sort_values(['userId', 'timestamp'])
@@ -323,13 +317,8 @@ def prepare_sequential_data(ratings_path, min_interactions=20, min_seq_length=5,
     max_sequences_per_user = 5  # Further limit sequences per user to prevent memory explosion
     
     grouped = list(ratings_df.groupby('userId'))
-    total_users = len(grouped)
-    print(f"Processing {total_users} users for sequence generation...")
     
     for idx, (user_id, group) in enumerate(grouped):
-        if idx % 1000 == 0:
-            print(f"Processed {idx}/{total_users} users, generated {len(user_sequences)} sequences so far")
-            
         items = group['item_idx'].tolist()
         
         if len(items) < min_seq_length + 1:
@@ -352,7 +341,6 @@ def prepare_sequential_data(ratings_path, min_interactions=20, min_seq_length=5,
         # Clear items list to free memory
         del items
     
-    print(f"Generated {len(user_sequences)} total sequences")
     del grouped  # Free memory
     
     
@@ -464,8 +452,6 @@ def train_sequential_with_wandb(args):
             resume=False
         )
     except Exception as e:
-        print(f"Warning: Failed to initialize W&B: {e}")
-        print("Continuing training without W&B logging...")
         wandb_manager = None
     
     # Override wandb config if provided and wandb_manager exists
@@ -493,7 +479,6 @@ def train_sequential_with_wandb(args):
         
         # Create model
         num_items = metadata['num_items']
-        print(f"Creating model with {num_items} items")
         
         model = AttentionalSequentialRecommender(
             num_items=num_items,
@@ -506,13 +491,8 @@ def train_sequential_with_wandb(args):
         )
         
         # Validate data ranges
-        print("Validating data ranges...")
         sample_batch = next(iter(train_loader))
         sequences, targets = sample_batch
-        print(f"Sequence range: {sequences.min().item()} to {sequences.max().item()}")
-        print(f"Target range: {targets.min().item()} to {targets.max().item()}")
-        print(f"Expected sequence range: 0 to {num_items}")
-        print(f"Expected target range: 0 to {num_items - 1}")
         
         # Check for any out-of-bounds indices
         if sequences.max().item() > num_items:
@@ -532,13 +512,10 @@ def train_sequential_with_wandb(args):
         else:
             device = torch.device(args.device)
         
-        print(f"Using device: {device}")
-        
         # Enable CUDA debugging if using CUDA
         if device.type == 'cuda':
             import os
             os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
-            print("CUDA debugging enabled")
         
         model = model.to(device)
         
@@ -567,34 +544,14 @@ def train_sequential_with_wandb(args):
             train_accuracies = []
             
             for batch_idx, (sequences, targets) in enumerate(train_loader):
-                try:
-                    sequences = sequences.to(device)
-                    targets = targets.to(device).squeeze()
-                    
-                    # Debug: Check for invalid indices in first few batches
-                    if batch_idx < 3:
-                        seq_max = sequences.max().item()
-                        seq_min = sequences.min().item()
-                        tgt_max = targets.max().item()
-                        tgt_min = targets.min().item()
-                        print(f"Batch {batch_idx}: seq [{seq_min}, {seq_max}], tgt [{tgt_min}, {tgt_max}]")
-                        
-                        if seq_max > num_items or tgt_max >= num_items or tgt_min < 0:
-                            print(f"ERROR: Invalid indices detected in batch {batch_idx}")
-                            print(f"Sequences shape: {sequences.shape}, Targets shape: {targets.shape}")
-                            continue
-                    
-                    optimizer.zero_grad()
-                    
-                    logits = model(sequences)
-                    loss = criterion(logits, targets)
-                    loss.backward()
-                    
-                except RuntimeError as e:
-                    print(f"CUDA error in batch {batch_idx}: {e}")
-                    print(f"Sequences shape: {sequences.shape}, range: [{sequences.min().item()}, {sequences.max().item()}]")
-                    print(f"Targets shape: {targets.shape}, range: [{targets.min().item()}, {targets.max().item()}]")
-                    raise
+                sequences = sequences.to(device)
+                targets = targets.to(device).squeeze()
+                
+                optimizer.zero_grad()
+                
+                logits = model(sequences)
+                loss = criterion(logits, targets)
+                loss.backward()
                 
                 # Gradient clipping
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -737,7 +694,8 @@ def train_sequential_with_wandb(args):
             'model_size_mb': sum(p.numel() * p.element_size() for p in model.parameters()) / (1024**2)
         }
         
-        wandb_manager.log_metrics({f'final/{k}': v for k, v in final_metrics.items()})
+        if wandb_manager:
+            wandb_manager.log_metrics({f'final/{k}': v for k, v in final_metrics.items()})
         
         
         return model, final_metrics
@@ -750,16 +708,16 @@ def train_sequential_with_wandb(args):
         if wandb_manager:
             try:
                 wandb_manager.finish()
-            except Exception as e:
-                print(f"Warning: Failed to finish W&B run: {e}")
+            except Exception:
+                pass
         
         # Also try to finish regular wandb
         try:
             import wandb
             if wandb.run is not None:
                 wandb.finish()
-        except Exception as e:
-            print(f"Warning: Failed to finish regular wandb: {e}")
+        except Exception:
+            pass
 
 
 def main():
