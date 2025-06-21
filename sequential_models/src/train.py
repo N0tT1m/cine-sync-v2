@@ -64,8 +64,16 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Train Sequential Recommendation models')
     
     # Data preprocessing arguments
-    parser.add_argument('--ratings-path', type=str, default='../../movies/cinesync/ml-32m/ratings.csv',
-                       help='Path to ratings CSV file (userId, movieId, rating, timestamp)')
+    parser.add_argument('--content-type', type=str, default='movies', 
+                       choices=['movies', 'tv', 'both'],
+                       help='Type of content to train on: movies, tv shows, or both')
+    parser.add_argument('--dataset-sources', type=str, nargs='+', 
+                       default=['movielens', 'netflix', 'tmdb', 'amazon', 'disney'],
+                       help='Dataset sources to use (auto-selects based on content-type)')
+    parser.add_argument('--ratings-path', type=str, default=None,
+                       help='Path to ratings CSV file (auto-detected if not provided)')
+    parser.add_argument('--combine-datasets', action='store_true', default=True,
+                       help='Combine multiple datasets for training (enabled by default)')
     parser.add_argument('--min-interactions', type=int, default=20,
                        help='Minimum interactions per user (filter cold users)')
     parser.add_argument('--min-seq-length', type=int, default=5,
@@ -132,6 +140,204 @@ def parse_args():
                        help='Top-k values for evaluation')
     
     return parser.parse_args()
+
+
+def load_comprehensive_datasets(content_type: str, dataset_sources: list, combine_datasets: bool = True) -> tuple:
+    """Load and combine datasets based on content type and sources - identical to NCF version"""
+    import glob
+    import pandas as pd
+    from pathlib import Path
+    
+    logger = logging.getLogger(__name__)
+    
+    # Dataset mapping (same as NCF)
+    movie_datasets = {
+        'movielens': {
+            'ratings': '../../movies/cinesync/ml-32m/ratings.csv',
+            'content': '../../movies/cinesync/ml-32m/movies.csv',
+            'id_col': 'movieId',
+            'title_col': 'title'
+        },
+        'netflix': {
+            'content': '../../movies/netflix/netflix_movies.csv',
+            'id_col': 'show_id',
+            'title_col': 'title'
+        },
+        'tmdb': {
+            'content': '../../movies/tmdb-movies/movies_metadata.csv',
+            'id_col': 'id', 
+            'title_col': 'title'
+        },
+        'amazon': {
+            'content': '../../movies/amazon/amazon_prime_titles.csv',
+            'id_col': 'show_id',
+            'title_col': 'title'
+        },
+        'disney': {
+            'content': '../../movies/disney/disney_plus_movies.csv',
+            'id_col': 'show_id',
+            'title_col': 'title'
+        }
+    }
+    
+    tv_datasets = {
+        'tmdb': {
+            'content': '../../tv/misc/TMDB_tv_dataset_v3.csv',
+            'id_col': 'id',
+            'title_col': 'name'
+        },
+        'netflix': {
+            'content': '../../tv/netflix/netflix_titles.csv',
+            'id_col': 'show_id',
+            'title_col': 'title'
+        },
+        'amazon': {
+            'content': '../../tv/amazon/amazon_prime_tv_shows.csv',
+            'id_col': 'show_id',
+            'title_col': 'title'
+        },
+        'disney': {
+            'content': '../../tv/misc/disney_plus_tv_shows.csv',
+            'id_col': 'show_id',
+            'title_col': 'title'
+        },
+        'anime': {
+            'content': '../../tv/anime/animes.csv',
+            'id_col': 'anime_id',
+            'title_col': 'Name'
+        },
+        'imdb': {
+            'content': '../../tv/imdb/*.csv',
+            'id_col': 'tconst',
+            'title_col': 'primaryTitle'
+        }
+    }
+    
+    all_ratings = []
+    all_content = []
+    
+    # Load movie datasets
+    if content_type in ['movies', 'both']:
+        for source in dataset_sources:
+            if source in movie_datasets:
+                dataset_info = movie_datasets[source]
+                logger.info(f"Loading movie dataset: {source}")
+                
+                content_path = dataset_info['content']
+                if Path(content_path).exists():
+                    try:
+                        content_df = pd.read_csv(content_path)
+                        content_df = content_df.rename(columns={
+                            dataset_info['id_col']: 'itemId',
+                            dataset_info['title_col']: 'title'
+                        })
+                        content_df['content_type'] = 'movie'
+                        content_df['source'] = source
+                        all_content.append(content_df)
+                        
+                        if 'ratings' in dataset_info:
+                            ratings_path = dataset_info['ratings']
+                            if Path(ratings_path).exists():
+                                ratings_df = pd.read_csv(ratings_path)
+                                ratings_df = ratings_df.rename(columns={
+                                    dataset_info['id_col']: 'itemId'
+                                })
+                                ratings_df['content_type'] = 'movie'
+                                ratings_df['source'] = source
+                                all_ratings.append(ratings_df)
+                                
+                    except Exception as e:
+                        logger.warning(f"Failed to load {source} movie dataset: {e}")
+    
+    # Load TV datasets  
+    if content_type in ['tv', 'both']:
+        for source in dataset_sources:
+            if source in tv_datasets:
+                dataset_info = tv_datasets[source]
+                logger.info(f"Loading TV dataset: {source}")
+                
+                content_path = dataset_info['content']
+                if '*' in content_path:
+                    content_files = glob.glob(content_path)
+                else:
+                    content_files = [content_path]
+                
+                for file_path in content_files:
+                    if Path(file_path).exists():
+                        try:
+                            content_df = pd.read_csv(file_path)
+                            content_df = content_df.rename(columns={
+                                dataset_info['id_col']: 'itemId',
+                                dataset_info['title_col']: 'title'
+                            })
+                            content_df['content_type'] = 'tv'
+                            content_df['source'] = source
+                            all_content.append(content_df)
+                            
+                        except Exception as e:
+                            logger.warning(f"Failed to load {file_path}: {e}")
+    
+    # Combine datasets
+    if all_content:
+        combined_content = pd.concat(all_content, ignore_index=True)
+        combined_content = combined_content.drop_duplicates(subset=['title'], keep='first')
+        combined_content['itemId'] = range(1, len(combined_content) + 1)
+    else:
+        raise ValueError(f"No content datasets found for content_type: {content_type}")
+    
+    # Handle ratings
+    if all_ratings:
+        combined_ratings = pd.concat(all_ratings, ignore_index=True)
+    else:
+        logger.info("Creating synthetic ratings for sequential training...")
+        combined_ratings = create_synthetic_ratings_sequential(combined_content)
+    
+    logger.info(f"Loaded {len(combined_content)} items and {len(combined_ratings)} ratings for sequential training")
+    return combined_ratings, combined_content
+
+
+def create_synthetic_ratings_sequential(content_df: pd.DataFrame) -> pd.DataFrame:
+    """Create synthetic sequential ratings with temporal patterns"""
+    import numpy as np
+    from datetime import datetime, timedelta
+    
+    num_synthetic_users = 1000
+    avg_ratings_per_user = 80  # More ratings for sequential patterns
+    
+    synthetic_ratings = []
+    base_timestamp = int(datetime(2020, 1, 1).timestamp())
+    
+    for user_id in range(1, num_synthetic_users + 1):
+        # Create realistic sequential viewing patterns
+        num_ratings = np.random.poisson(avg_ratings_per_user)
+        user_items = content_df.sample(n=min(num_ratings, len(content_df)))
+        
+        # Sort by some logical order (e.g., release date if available)
+        current_timestamp = base_timestamp + np.random.randint(0, 365*24*3600)  # Random start time
+        
+        for idx, (_, item) in enumerate(user_items.iterrows()):
+            # Sequential timestamps (realistic viewing intervals)
+            time_gap = np.random.exponential(3*24*3600)  # Average 3 days between views
+            current_timestamp += int(time_gap)
+            
+            # Generate ratings with some sequential correlation
+            if idx == 0:
+                rating = np.random.normal(3.5, 1.0)
+            else:
+                # Some correlation with previous rating (viewing patterns)
+                prev_rating = synthetic_ratings[-1]['rating']
+                rating = np.random.normal(prev_rating, 0.8)
+            
+            rating = np.clip(rating, 0.5, 5.0)
+            
+            synthetic_ratings.append({
+                'userId': user_id,
+                'itemId': item['itemId'],
+                'rating': rating,
+                'timestamp': current_timestamp
+            })
+    
+    return pd.DataFrame(synthetic_ratings).sort_values(['userId', 'timestamp'])
 
 
 def create_model(model_type: str, config: dict, args) -> torch.nn.Module:
@@ -246,10 +452,19 @@ def main():
     )
     
     try:
-        # Load and preprocess data with temporal ordering
-        logger.info("Loading and preprocessing data for sequential modeling...")
+        # Load comprehensive datasets for sequential modeling
+        logger.info(f"Loading {args.content_type} datasets for sequential modeling from: {args.dataset_sources}")
+        ratings_df, content_df = load_comprehensive_datasets(
+            content_type=args.content_type,
+            dataset_sources=args.dataset_sources,
+            combine_datasets=args.combine_datasets
+        )
+        
+        # Create sequential data loader with loaded datasets
+        logger.info("Creating sequential data loader...")
         data_loader = SequentialDataLoader(
-            ratings_path=args.ratings_path,
+            ratings_df=ratings_df,                   # Combined ratings with temporal data
+            content_df=content_df,                   # Combined content metadata
             min_interactions=args.min_interactions,  # Filter sparse users
             min_seq_length=args.min_seq_length,      # Minimum meaningful sequence
             max_seq_length=args.max_seq_length       # Truncation point for efficiency

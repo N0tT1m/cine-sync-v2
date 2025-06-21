@@ -10,7 +10,9 @@
 
 # Model files (generated during training - exclude large files but keep Python code)
 *.pt
+*.pt 2
 *.pkl
+*.pth
 
 # Allow all Python model files
 !/models/*.py
