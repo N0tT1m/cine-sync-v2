@@ -91,14 +91,150 @@ class TVShowTrainer:
         # Paths
         self.models_dir = Path(config.model.models_dir)
         self.models_dir.mkdir(exist_ok=True)
+    
+    def load_comprehensive_tv_datasets(self, tv_sources: list) -> tuple:
+        """Load comprehensive TV datasets from multiple sources"""
+        import glob
+        import pandas as pd
+        
+        tv_datasets = {
+            'tmdb': {
+                'content': '../../tv/misc/TMDB_tv_dataset_v3.csv',
+                'id_col': 'id',
+                'title_col': 'name'
+            },
+            'netflix': {
+                'content': '../../tv/netflix/netflix_titles.csv',
+                'id_col': 'show_id',
+                'title_col': 'title'
+            },
+            'amazon': {
+                'content': '../../tv/amazon/amazon_prime_tv_shows.csv',
+                'id_col': 'show_id',
+                'title_col': 'title'
+            },
+            'disney': {
+                'content': '../../tv/misc/disney_plus_tv_shows.csv',
+                'id_col': 'show_id',
+                'title_col': 'title'
+            },
+            'anime': {
+                'content': '../../tv/anime/animes.csv',
+                'id_col': 'anime_id',
+                'title_col': 'Name'
+            },
+            'imdb': {
+                'content': '../../tv/imdb/*.csv',
+                'id_col': 'tconst',
+                'title_col': 'primaryTitle'
+            }
+        }
+        
+        all_content = []
+        
+        for source in tv_sources:
+            if source in tv_datasets:
+                dataset_info = tv_datasets[source]
+                logger.info(f"Loading TV dataset: {source}")
+                
+                content_path = dataset_info['content']
+                if '*' in content_path:
+                    content_files = glob.glob(content_path)
+                else:
+                    content_files = [content_path]
+                
+                for file_path in content_files:
+                    if Path(file_path).exists():
+                        try:
+                            content_df = pd.read_csv(file_path)
+                            
+                            # Handle different CSV structures
+                            if dataset_info['id_col'] in content_df.columns:
+                                content_df = content_df.rename(columns={
+                                    dataset_info['id_col']: 'show_id',
+                                    dataset_info['title_col']: 'title'
+                                })
+                            elif 'id' in content_df.columns:
+                                content_df = content_df.rename(columns={'id': 'show_id'})
+                            
+                            # Ensure required columns exist
+                            if 'show_id' not in content_df.columns:
+                                content_df['show_id'] = range(len(content_df))
+                            if 'title' not in content_df.columns and 'Title' in content_df.columns:
+                                content_df['title'] = content_df['Title']
+                            
+                            content_df['source'] = source
+                            all_content.append(content_df)
+                            
+                        except Exception as e:
+                            logger.warning(f"Failed to load {file_path}: {e}")
+        
+        # Combine all TV content
+        if all_content:
+            combined_content = pd.concat(all_content, ignore_index=True)
+            combined_content = combined_content.drop_duplicates(subset=['title'], keep='first')
+            combined_content['show_id'] = range(1, len(combined_content) + 1)
+        else:
+            raise ValueError("No TV datasets found")
+        
+        # Create synthetic ratings for TV content
+        logger.info("Creating synthetic ratings for TV content training...")
+        synthetic_ratings = self._create_synthetic_tv_ratings(combined_content)
+        
+        logger.info(f"Loaded {len(combined_content)} TV shows and {len(synthetic_ratings)} synthetic ratings")
+        return synthetic_ratings, combined_content
+    
+    def _create_synthetic_tv_ratings(self, shows_df: pd.DataFrame) -> pd.DataFrame:
+        """Create synthetic ratings specifically for TV shows"""
+        import numpy as np
+        
+        # Create TV-specific viewing patterns
+        num_users = 2000  # More users for TV content
+        avg_shows_per_user = 30
+        
+        synthetic_ratings = []
+        
+        for user_id in range(1, num_users + 1):
+            # Sample shows for this user
+            num_shows = np.random.poisson(avg_shows_per_user)
+            user_shows = shows_df.sample(n=min(num_shows, len(shows_df)))
+            
+            for _, show in user_shows.iterrows():
+                # TV shows often have binge-watching patterns
+                base_rating = 3.5
+                
+                # Adjust based on source (some platforms have higher-rated content)
+                source = show.get('source', 'unknown')
+                if source in ['netflix', 'disney']:
+                    base_rating += 0.3
+                elif source == 'anime':
+                    base_rating += 0.2
+                
+                # Add variance
+                rating = np.clip(
+                    np.random.normal(base_rating, 0.8), 
+                    1.0, 5.0
+                )
+                
+                synthetic_ratings.append({
+                    'user_id': user_id,
+                    'show_id': show['show_id'],
+                    'rating': rating
+                })
+        
+        return pd.DataFrame(synthetic_ratings)
         
     def prepare_data(self) -> dict:
-        """Prepare TV show training data"""
-        logger.info("Preparing TV show training data...")
+        """Prepare TV show training data from comprehensive TV datasets"""
+        logger.info("Preparing TV show training data from all available TV datasets...")
+        
+        # Use comprehensive TV dataset loading
+        tv_sources = ['tmdb', 'netflix', 'amazon', 'disney', 'anime', 'imdb']
+        ratings_df, content_df = self.load_comprehensive_tv_datasets(tv_sources)
         
         # Process TV show datasets
         processor = TVDatasetProcessor()
-        training_data = processor.create_training_data()
+        training_data = processor.create_training_data_from_dataframes(ratings_df, content_df)
         
         if not training_data or training_data['shows_df'].empty:
             raise ValueError("No TV show data available for training")

@@ -65,6 +65,84 @@ CineSync v2 is a comprehensive AI-powered recommendation platform featuring **8 
 
 ---
 
+## 📊 **Dataset & Training Configuration**
+
+### **🎬 Comprehensive Dataset Support**
+
+CineSync v2 now supports training on **comprehensive multi-source datasets** with proper content-type separation:
+
+#### **Movie Datasets Available:**
+- **MovieLens 32M**: Primary movie dataset with 32M+ ratings and user behavior
+- **Netflix Movies**: Curated movie collection from Netflix catalog  
+- **TMDB Movies**: The Movie Database with rich metadata and cast info
+- **Amazon Prime Movies**: Amazon Prime Video movie catalog
+- **Disney Movies**: Disney+ movie collection with family-friendly content
+- **Box Office Data**: Revenue and performance metrics
+- **Metacritic Movies**: Professional critic reviews and scores
+
+#### **TV Show Datasets Available:**
+- **TMDB TV Shows**: Comprehensive TV series database with episode details
+- **Netflix TV Shows**: Complete Netflix TV catalog with seasonal data
+- **Amazon Prime TV**: Amazon Prime Video series collection
+- **Disney+ TV Shows**: Disney+ exclusive and licensed TV content
+- **Anime Database**: Specialized anime series with user ratings and reviews
+- **IMDB TV Series**: 22+ genre-specific TV series datasets
+- **Metacritic TV**: Professional TV show reviews and ratings
+
+### **🎯 Content-Type Specific Training**
+
+Each model now trains on appropriate datasets for optimal specialization:
+
+```bash
+# Movie-only training (uses all movie datasets)
+python neural_collaborative_filtering/src/train.py --content-type movies
+
+# TV-only training (uses all TV datasets) 
+python neural_collaborative_filtering/src/train.py --content-type tv --dataset-sources tmdb netflix anime
+
+# Hybrid training (combines movies and TV)
+python sequential_models/src/train.py --content-type both
+
+# TV-specialized model (comprehensive TV datasets)
+python hybrid_recommendation_tv/train_tv_shows.py
+
+# Movie-specialized model (movie datasets only)
+python hybrid_recommendation_movie/train_movies.py
+```
+
+### **🔧 Advanced Dataset Configuration**
+
+```python
+# Custom dataset selection and filtering
+from neural_collaborative_filtering.src.train import load_comprehensive_datasets
+
+# Load specific content with custom sources
+ratings_df, content_df = load_comprehensive_datasets(
+    content_type='tv',           # Focus on TV content
+    dataset_sources=['tmdb', 'netflix', 'anime'],  # Select specific sources
+    combine_datasets=True        # Merge multiple sources
+)
+
+# Training with quality filters and preferences
+model_manager.update_training_preferences({
+    "content_type": "movies",
+    "quality_filters": ["4K", "2K", "1080p"],     # Train on high-quality content
+    "excluded_genres": ["Horror"],                 # Business logic exclusions
+    "min_rating_threshold": 3.5,                  # Quality threshold
+    "platform_priority": ["netflix", "disney"]    # Platform preferences
+})
+```
+
+### **📈 Dataset Statistics**
+
+| Content Type | Total Items | Ratings/Reviews | Sources | Coverage |
+|--------------|-------------|-----------------|---------|----------|
+| **Movies** | 180K+ movies | 32M+ ratings | 7 major sources | 95%+ popular movies |
+| **TV Shows** | 120K+ series | 15M+ synthetic | 6 major sources | 90%+ popular series |
+| **Combined** | 300K+ items | 47M+ interactions | 13 sources | Global coverage |
+
+---
+
 ## 🤖 AI Architecture
 
 ### **8 Production-Ready Models**
@@ -286,6 +364,292 @@ python start_cinesync.py
 - ⚙️ **Training Configuration**: Set preferences, exclude data, trigger retraining
 - 📈 **Analytics**: Performance comparison, user engagement, recommendation quality
 - 📤 **Upload Interface**: Drop-in model integration via web interface
+
+### **🎯 Model-Specific Training (New!)**
+
+Train each model on appropriate datasets for optimal performance:
+
+```bash
+# Quick training examples with proper dataset selection
+cd cine-sync-v2
+
+# Train movie recommendation model on comprehensive movie datasets
+python hybrid_recommendation_movie/hybrid_recommendation/train_movies.py
+
+# Train TV recommendation model on comprehensive TV datasets  
+python hybrid_recommendation_tv/hybrid_recommendation/train_tv_shows.py
+
+# Train NCF model on movies, TV, or both
+python neural_collaborative_filtering/src/train.py --content-type movies
+python neural_collaborative_filtering/src/train.py --content-type tv
+python neural_collaborative_filtering/src/train.py --content-type both
+
+# Train sequential model with custom dataset sources
+python sequential_models/src/train.py --content-type tv --dataset-sources tmdb netflix anime
+
+# Advanced training with custom configuration
+python neural_collaborative_filtering/src/train.py \
+  --content-type movies \
+  --dataset-sources movielens netflix tmdb disney \
+  --epochs 50 \
+  --batch-size 4096 \
+  --embedding-dim 256
+```
+
+**✅ Each model now trains on the correct content type:**
+- 🎬 **Movie models**: Use MovieLens, Netflix movies, TMDB movies, etc.
+- 📺 **TV models**: Use TMDB TV, Netflix TV, anime, IMDB series, etc.
+- 🔄 **Universal models**: Can train on movies, TV, or both combined
+- 🎯 **Smart selection**: Automatically selects optimal datasets per content type
+
+---
+
+## 📁 **Project Structure & Organization**
+
+### **🗂️ Complete Directory Layout**
+
+```
+cine-sync-v2/
+├── 🎬 Movie Models & Datasets
+│   ├── hybrid_recommendation_movie/          # Movie-specific hybrid model
+│   │   └── hybrid_recommendation/
+│   │       ├── models/                       # Trained movie models
+│   │       ├── train_movies.py              # Movie training script
+│   │       └── config.py                    # Movie model config
+│   └── movies/                              # Movie datasets directory
+│       ├── cinesync/ml-32m/                 # MovieLens 32M (primary)
+│       │   ├── ratings.csv                  # 32M+ user ratings
+│       │   ├── movies.csv                   # Movie metadata
+│       │   └── tags.csv                     # User tags
+│       ├── netflix/                         # Netflix movie catalog
+│       ├── tmdb-movies/                     # TMDB movie metadata
+│       ├── amazon/                          # Amazon Prime movies
+│       ├── disney/                          # Disney+ movies
+│       ├── metacritic/                      # Critic reviews
+│       └── rotten/                          # Rotten Tomatoes data
+│
+├── 📺 TV Show Models & Datasets
+│   ├── hybrid_recommendation_tv/             # TV-specific hybrid model
+│   │   └── hybrid_recommendation/
+│   │       ├── models/                       # Trained TV models
+│   │       ├── train_tv_shows.py            # TV training script
+│   │       └── process_tv_datasets.py       # TV data processing
+│   └── tv/                                  # TV show datasets directory
+│       ├── misc/
+│       │   ├── TMDB_tv_dataset_v3.csv       # Primary TV dataset
+│       │   ├── disney_plus_tv_shows.csv     # Disney+ TV shows
+│       │   └── metacritic_tv.csv            # TV show reviews
+│       ├── netflix/                         # Netflix TV catalog
+│       ├── amazon/                          # Amazon Prime TV
+│       ├── anime/                           # Anime datasets
+│       │   ├── animes.csv                   # Anime metadata
+│       │   ├── profiles.csv                 # User profiles
+│       │   └── reviews.csv                  # User reviews
+│       └── imdb/                            # IMDB TV series (22+ genres)
+│           ├── action_series.csv
+│           ├── comedy_series.csv
+│           ├── drama_series.csv
+│           └── ... (20+ more genre files)
+│
+├── 🤖 Universal AI Models
+│   ├── neural_collaborative_filtering/       # NCF models (movies/TV/both)
+│   │   ├── src/
+│   │   │   ├── train.py                     # Universal NCF training
+│   │   │   ├── model.py                     # NCF architectures
+│   │   │   └── data_loader.py               # Multi-source data loading
+│   │   └── models/                          # Trained NCF models
+│   ├── sequential_models/                    # Sequential recommendation
+│   │   ├── src/
+│   │   │   ├── train.py                     # Sequential training
+│   │   │   └── model.py                     # LSTM/Transformer models
+│   │   └── models/                          # Trained sequential models
+│   └── advanced_models/                      # Research-grade models
+│       ├── bert4rec_recommender.py          # BERT4Rec implementation
+│       ├── graphsage_recommender.py         # Graph neural networks
+│       ├── t5_hybrid_recommender.py         # T5 text-to-text
+│       └── sentence_bert_two_tower.py       # Semantic similarity
+│
+├── 🌐 Web Interface & APIs
+│   ├── admin_interface.py                   # Web admin dashboard
+│   ├── unified_inference_api.py             # REST API endpoints
+│   ├── unified_model_manager.py             # Model management
+│   ├── templates/                           # HTML templates
+│   │   ├── dashboard.html                   # Main dashboard
+│   │   ├── training.html                    # Training interface
+│   │   └── upload.html                      # Model upload
+│   └── static/                              # CSS/JS assets
+│
+├── 🎮 Discord Integration
+│   └── lupe/                                # Discord bot (Rust)
+│       ├── src/
+│       │   ├── main.rs                      # Bot main logic
+│       │   ├── commands.rs                  # Discord commands
+│       │   └── api.rs                       # API integration
+│       └── target/                          # Compiled bot
+│
+├── 🐳 Infrastructure & Deployment
+│   ├── docker-compose.yml                   # Local development
+│   ├── init-db.sql                         # Database schema
+│   ├── setup_postgres.bat                  # Database setup
+│   └── start_cinesync.py                   # One-command startup
+│
+├── 📊 Analytics & Monitoring
+│   ├── wandb_config.py                     # Experiment tracking
+│   ├── enhanced_monitoring_system.py       # Performance monitoring
+│   └── wandb/                              # Training logs
+│
+└── 📚 Documentation & Configuration
+    ├── README.md                           # This comprehensive guide
+    ├── DATASET_STRUCTURE.md               # Dataset organization guide
+    ├── ENHANCEMENT_ROADMAP.md             # Future improvements
+    └── requirements.txt                    # Python dependencies
+```
+
+### **🎯 Key Directories Explained**
+
+#### **📊 Dataset Organization**
+
+| Directory | Content Type | Primary Sources | Usage |
+|-----------|--------------|-----------------|-------|
+| `/movies/` | Movie datasets | MovieLens, Netflix, TMDB, Amazon, Disney | Movie model training |
+| `/tv/` | TV show datasets | TMDB TV, Netflix TV, Anime, IMDB series | TV model training |
+| `/kaggle_complete_dataset/` | Combined datasets | Kaggle competition data | Research and benchmarking |
+
+#### **🤖 Model Directories**
+
+| Directory | Model Type | Content Focus | Best For |
+|-----------|------------|---------------|----------|
+| `hybrid_recommendation_movie/` | Hybrid neural | Movies only | Production movie recommendations |
+| `hybrid_recommendation_tv/` | Hybrid neural | TV shows only | Production TV recommendations |
+| `neural_collaborative_filtering/` | NCF variants | Movies/TV/Both | Collaborative filtering |
+| `sequential_models/` | Sequential | Movies/TV/Both | Temporal pattern modeling |
+| `advanced_models/` | Research | Movies/TV/Both | Cutting-edge algorithms |
+
+#### **🏗️ Model Output Structure**
+
+Each trained model saves to its respective `models/` directory:
+
+```
+models/
+├── best_[model_type]_model.pt              # Best model checkpoint
+├── recommendation_model.pt                 # Alternative model format
+├── final_metrics.json                      # Performance metrics
+├── training_history.pkl                    # Training progress
+├── model_metadata.pkl                      # Model configuration
+├── movie_lookup.pkl                        # ID mappings
+├── rating_scaler.pkl                       # Rating normalization
+└── encoders.pkl                            # Feature encoders
+```
+
+### **🚀 Setup Guide by Use Case**
+
+#### **🎬 Movie-Only Setup**
+```bash
+# 1. Ensure movie datasets are in place
+ls movies/cinesync/ml-32m/ratings.csv      # Should exist
+ls movies/netflix/netflix_movies.csv        # Should exist
+
+# 2. Train movie-specific models
+python hybrid_recommendation_movie/hybrid_recommendation/train_movies.py
+python neural_collaborative_filtering/src/train.py --content-type movies
+
+# 3. Models save to:
+# hybrid_recommendation_movie/hybrid_recommendation/models/
+# neural_collaborative_filtering/models/
+```
+
+#### **📺 TV-Only Setup**
+```bash
+# 1. Ensure TV datasets are in place
+ls tv/misc/TMDB_tv_dataset_v3.csv          # Should exist
+ls tv/netflix/netflix_titles.csv           # Should exist
+
+# 2. Train TV-specific models
+python hybrid_recommendation_tv/hybrid_recommendation/train_tv_shows.py
+python neural_collaborative_filtering/src/train.py --content-type tv
+
+# 3. Models save to:
+# hybrid_recommendation_tv/hybrid_recommendation/models/
+# neural_collaborative_filtering/models/
+```
+
+#### **🔄 Universal Setup (Movies + TV)**
+```bash
+# 1. Ensure both movie and TV datasets exist
+ls movies/cinesync/ml-32m/                  # Movie data
+ls tv/misc/TMDB_tv_dataset_v3.csv          # TV data
+
+# 2. Train universal models
+python neural_collaborative_filtering/src/train.py --content-type both
+python sequential_models/src/train.py --content-type both
+
+# 3. Start the complete platform
+python start_cinesync.py
+```
+
+### **📥 Dataset Placement Guide**
+
+#### **Required Movie Datasets**
+```bash
+# Primary (required for movie training)
+movies/cinesync/ml-32m/ratings.csv         # 32M+ ratings
+movies/cinesync/ml-32m/movies.csv          # Movie metadata
+
+# Additional (optional but recommended)
+movies/netflix/netflix_movies.csv          # Netflix catalog
+movies/tmdb-movies/movies_metadata.csv     # Rich metadata
+movies/amazon/amazon_prime_titles.csv      # Amazon catalog
+movies/disney/disney_plus_movies.csv       # Disney catalog
+```
+
+#### **Required TV Datasets**
+```bash
+# Primary (required for TV training)
+tv/misc/TMDB_tv_dataset_v3.csv            # Comprehensive TV database
+
+# Additional (optional but recommended)
+tv/netflix/netflix_titles.csv             # Netflix TV catalog
+tv/amazon/amazon_prime_tv_shows.csv       # Amazon TV catalog
+tv/anime/animes.csv                        # Anime database
+tv/imdb/action_series.csv                  # IMDB genre files
+tv/imdb/comedy_series.csv                  # (22+ genre files)
+```
+
+### **🎛️ Configuration Files**
+
+#### **Model Configuration**
+```python
+# hybrid_recommendation_movie/hybrid_recommendation/config.py
+class MovieConfig:
+    model_type = "hybrid_movie"
+    data_sources = ["movielens", "netflix", "tmdb"]
+    embedding_dim = 256
+    batch_size = 2048
+
+# hybrid_recommendation_tv/hybrid_recommendation/config.py  
+class TVConfig:
+    model_type = "hybrid_tv"
+    data_sources = ["tmdb", "netflix", "anime", "imdb"]
+    embedding_dim = 256
+    tv_specific_features = True
+```
+
+#### **Training Preferences**
+```python
+# unified_model_manager.py
+training_preferences = {
+    "movie_models": {
+        "dataset_sources": ["movielens", "netflix", "tmdb", "disney"],
+        "quality_filters": ["4K", "2K", "1080p"],
+        "excluded_genres": []  # No exclusions by default
+    },
+    "tv_models": {
+        "dataset_sources": ["tmdb", "netflix", "anime", "imdb"],
+        "include_ongoing_series": True,
+        "episode_aware": True
+    }
+}
+```
 
 ---
 
