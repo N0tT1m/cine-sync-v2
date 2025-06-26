@@ -325,7 +325,7 @@ def prepare_sequential_data(ratings_path, min_interactions=20, min_seq_length=5,
     
     # Create item encoder
     item_encoder = LabelEncoder()
-    ratings_df['item_idx'] = item_encoder.fit_transform(ratings_df['movieId']) + 1  # +1 for padding
+    ratings_df['item_idx'] = item_encoder.fit_transform(ratings_df['anime_uid']) + 1  # +1 for padding
     
     # Group by user to create sequences (memory-efficient)
     user_sequences = []
