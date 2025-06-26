@@ -236,23 +236,59 @@ def prepare_data(ratings_path, movies_path, test_size=0.2, val_size=0.1):
     if file_size > 100:  # Use chunked loading for files > 100MB
         ratings_df = load_ratings_chunked(ratings_path, chunk_size=5000)
     else:
-        ratings_df = pd.read_csv(ratings_path, dtype={'userId': 'int32', 'movieId': 'int32', 'rating': 'float32'})
+        # Load without dtype constraints to handle different column names
+        ratings_df = pd.read_csv(ratings_path)
+        
+    print(f"Original ratings shape: {ratings_df.shape}")
+    print(f"Ratings columns: {list(ratings_df.columns)}")
         
     movies_df = pd.read_csv(movies_path)
+    print(f"Movies columns: {list(movies_df.columns)}")
+    
+    # Auto-detect column names for different datasets
+    # For anime dataset: uid, anime_uid, score
+    # For movie dataset: userId, movieId, rating
+    user_col = None
+    item_col = None
+    rating_col = None
+    
+    # Detect user column
+    for col in ['userId', 'uid', 'user_id']:
+        if col in ratings_df.columns:
+            user_col = col
+            break
+    
+    # Detect item column  
+    for col in ['movieId', 'anime_uid', 'item_id', 'id']:
+        if col in ratings_df.columns:
+            item_col = col
+            break
+            
+    # Detect rating column
+    for col in ['rating', 'score', 'vote_average']:
+        if col in ratings_df.columns:
+            rating_col = col
+            break
+    
+    if not all([user_col, item_col, rating_col]):
+        raise ValueError(f"Could not detect required columns. Found: user={user_col}, item={item_col}, rating={rating_col}")
+    
+    print(f"Using columns: user={user_col}, item={item_col}, rating={rating_col}")
     
     # Create ID mappings to prevent out-of-bounds errors
-    unique_user_ids = sorted(ratings_df['userId'].unique())
-    unique_movie_ids = sorted(ratings_df['movieId'].unique())
+    unique_user_ids = sorted(ratings_df[user_col].unique())
+    unique_movie_ids = sorted(ratings_df[item_col].unique())
     
     user_id_to_idx = {user_id: idx for idx, user_id in enumerate(unique_user_ids)}
     movie_id_to_idx = {movie_id: idx for idx, movie_id in enumerate(unique_movie_ids)}
     
     # Map to contiguous indices
-    ratings_df['user_idx'] = ratings_df['userId'].map(user_id_to_idx)
-    ratings_df['movie_idx'] = ratings_df['movieId'].map(movie_id_to_idx)
+    ratings_df['user_idx'] = ratings_df[user_col].map(user_id_to_idx)
+    ratings_df['movie_idx'] = ratings_df[item_col].map(movie_id_to_idx)
+    ratings_df['rating'] = ratings_df[rating_col]  # Standardize rating column name
     
     # Remove any unmapped entries
-    ratings_df = ratings_df.dropna(subset=['user_idx', 'movie_idx'])
+    ratings_df = ratings_df.dropna(subset=['user_idx', 'movie_idx', 'rating'])
     
     # Convert to integers
     ratings_df['user_idx'] = ratings_df['user_idx'].astype(int)

@@ -104,8 +104,8 @@ python train_with_wandb.py \
 # 📺 Hybrid TV Model (Specialized for TV shows only)
 cd hybrid_recommendation_tv/hybrid_recommendation  
 python train_with_wandb.py \
-  --ratings-path ../../tv/misc/TMDB_tv_dataset_v3.csv \
-  --movies-path ../../tv/misc/TMDB_tv_dataset_v3.csv \
+  --ratings-path ../../tv/misc/reviews.csv \
+  --movies-path ../../tv/misc/animes.csv \
   --wandb-project cinesync-v2-hybrid-tv
 
 # 🧠 Neural Collaborative Filtering (Works with movies, TV, or both)
@@ -414,10 +414,10 @@ python train_with_wandb.py \
   --movies-path ../movies/cinesync/ml-32m/movies.csv \
   --wandb-project cinesync-v2-ncf-movies
 
-# For TV shows:
+# For TV shows (using anime dataset with actual user ratings):
 python train_with_wandb.py \
-  --ratings-path ../tv/misc/TMDB_tv_dataset_v3.csv \
-  --movies-path ../tv/misc/TMDB_tv_dataset_v3.csv \
+  --ratings-path ../tv/misc/reviews.csv \
+  --movies-path ../tv/misc/animes.csv \
   --wandb-project cinesync-v2-ncf-tv
 
 # 🔄 Sequential Model (Movies, TV, or both)  
@@ -428,10 +428,10 @@ python train_with_wandb.py \
   --movies-path ../movies/cinesync/ml-32m/movies.csv \
   --wandb-project cinesync-v2-sequential-movies
 
-# For TV shows:
+# For TV shows (using anime dataset with actual user ratings):
 python train_with_wandb.py \
-  --ratings-path ../tv/misc/TMDB_tv_dataset_v3.csv \
-  --movies-path ../tv/misc/TMDB_tv_dataset_v3.csv \
+  --ratings-path ../tv/misc/reviews.csv \
+  --movies-path ../tv/misc/animes.csv \
   --wandb-project cinesync-v2-sequential-tv
 
 # 🏗️ Two-Tower Model (Movies, TV, or both)
@@ -442,10 +442,10 @@ python train_with_wandb.py \
   --movies-path ../movies/cinesync/ml-32m/movies.csv \
   --wandb-project cinesync-v2-two-tower-movies
 
-# For TV shows:
+# For TV shows (using anime dataset with actual user ratings):
 python train_with_wandb.py \
-  --ratings-path ../tv/misc/TMDB_tv_dataset_v3.csv \
-  --movies-path ../tv/misc/TMDB_tv_dataset_v3.csv \
+  --ratings-path ../tv/misc/reviews.csv \
+  --movies-path ../tv/misc/animes.csv \
   --wandb-project cinesync-v2-two-tower-tv
 ```
 
@@ -453,6 +453,9 @@ python train_with_wandb.py \
 - 🎬 **Hybrid Models**: Specialized for either movies OR TV shows (not both)
 - 🧠 **NCF/Sequential/Two-Tower**: Universal models that work with movies, TV, or both
 - 📊 **Complete Commands**: See [training_commands.md](training_commands.md) for all variations
+
+**📝 Important Note on TV Show Training:**
+TV show training uses the anime reviews dataset (`reviews.csv` + `animes.csv`) which contains actual user ratings in the format: `uid` (user ID), `anime_uid` (item ID), `score` (rating). This is because most TV show datasets contain content metadata only, not user-item interaction data required for collaborative filtering.
 
 ---
 

@@ -17,20 +17,22 @@ python train_with_wandb.py \
 ```
 
 ## 📺 Hybrid Recommendation Model - TV Shows
-**Specialized for TV show recommendations**
+**Specialized for TV show recommendations (using anime ratings dataset)**
 ```bash
 cd hybrid_recommendation_tv/hybrid_recommendation
 python train_with_wandb.py \
-  --ratings-path ../../tv/misc/TMDB_tv_dataset_v3.csv \
-  --movies-path ../../tv/misc/TMDB_tv_dataset_v3.csv \
+  --ratings-path ../../tv/misc/reviews.csv \
+  --movies-path ../../tv/misc/animes.csv \
   --wandb-project cinesync-v2-hybrid-tv \
-  --wandb-tags hybrid tv-shows collaborative-filtering content-based \
+  --wandb-tags hybrid tv-shows anime collaborative-filtering content-based \
   --epochs 100 \
   --batch-size 512 \
   --learning-rate 0.001 \
   --embedding-dim 128 \
   --dropout 0.3
 ```
+
+**Note**: TV show training uses anime reviews dataset which has actual user ratings (`uid`, `anime_uid`, `score`) similar to movie ratings format.
 
 ## 🧠 Neural Collaborative Filtering (NCF) - Movies & Shows
 **Works with both movies and TV shows**
@@ -49,13 +51,13 @@ python train_with_wandb.py \
   --hidden-layers 128 64 \
   --dropout 0.2
 
-# For TV Shows
+# For TV Shows (using anime dataset with actual ratings)
 cd neural_collaborative_filtering
 python train_with_wandb.py \
-  --ratings-path ../tv/misc/TMDB_tv_dataset_v3.csv \
-  --movies-path ../tv/misc/TMDB_tv_dataset_v3.csv \
+  --ratings-path ../tv/misc/reviews.csv \
+  --movies-path ../tv/misc/animes.csv \
   --wandb-project cinesync-v2-ncf-tv \
-  --wandb-tags ncf collaborative-filtering tv-shows production \
+  --wandb-tags ncf collaborative-filtering tv-shows anime production \
   --epochs 100 \
   --batch-size 256 \
   --learning-rate 0.001 \
@@ -97,13 +99,13 @@ python train_with_wandb.py \
   --max-seq-length 50 \
   --dropout 0.1
 
-# For TV Shows
+# For TV Shows (using anime dataset with actual ratings)
 cd sequential_models
 python train_with_wandb.py \
-  --ratings-path ../tv/misc/TMDB_tv_dataset_v3.csv \
-  --movies-path ../tv/misc/TMDB_tv_dataset_v3.csv \
+  --ratings-path ../tv/misc/reviews.csv \
+  --movies-path ../tv/misc/animes.csv \
   --wandb-project cinesync-v2-sequential-tv \
-  --wandb-tags sequential transformer tv-shows production \
+  --wandb-tags sequential transformer tv-shows anime production \
   --epochs 50 \
   --batch-size 64 \
   --learning-rate 0.0001 \
@@ -149,13 +151,13 @@ python train_with_wandb.py \
   --num-layers 4 \
   --dropout 0.1
 
-# For TV Shows
+# For TV Shows (using anime dataset with actual ratings)
 cd two_tower_model
 python train_with_wandb.py \
-  --ratings-path ../tv/misc/TMDB_tv_dataset_v3.csv \
-  --movies-path ../tv/misc/TMDB_tv_dataset_v3.csv \
+  --ratings-path ../tv/misc/reviews.csv \
+  --movies-path ../tv/misc/animes.csv \
   --wandb-project cinesync-v2-two-tower-tv \
-  --wandb-tags two-tower attention tv-shows production \
+  --wandb-tags two-tower attention tv-shows anime production \
   --epochs 50 \
   --batch-size 32 \
   --learning-rate 0.0001 \
