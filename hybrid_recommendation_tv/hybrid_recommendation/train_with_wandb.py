@@ -130,14 +130,26 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Train Hybrid Recommender with Wandb')
     
     # Data arguments
-    # Try multiple possible paths for the data files
+    # Try multiple possible paths for TV/anime data files (TV model should default to TV data)
     possible_ratings_paths = [
+        str(Path(__file__).parent.parent.parent / 'tv' / 'misc' / 'reviews.csv'),
+        '../../tv/misc/reviews.csv',
+        '../tv/misc/reviews.csv',
+        'tv/misc/reviews.csv',
+        '/Users/timmy/workspace/ai-apps/cine-sync-v2/tv/misc/reviews.csv',
+        # Fallback to movie data if TV data not found
         str(Path(__file__).parent.parent.parent / 'movies' / 'cinesync' / 'ml-32m' / 'ratings.csv'),
         '../../movies/cinesync/ml-32m/ratings.csv',
         'movies/cinesync/ml-32m/ratings.csv',
         '/Users/timmy/workspace/ai-apps/cine-sync-v2/movies/cinesync/ml-32m/ratings.csv'
     ]
     possible_movies_paths = [
+        str(Path(__file__).parent.parent.parent / 'tv' / 'misc' / 'animes.csv'),
+        '../../tv/misc/animes.csv',
+        '../tv/misc/animes.csv', 
+        'tv/misc/animes.csv',
+        '/Users/timmy/workspace/ai-apps/cine-sync-v2/tv/misc/animes.csv',
+        # Fallback to movie data if TV data not found
         str(Path(__file__).parent.parent.parent / 'movies' / 'cinesync' / 'ml-32m' / 'movies.csv'),
         '../../movies/cinesync/ml-32m/movies.csv', 
         'movies/cinesync/ml-32m/movies.csv',
