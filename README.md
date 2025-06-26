@@ -94,20 +94,40 @@ CineSync v2 now supports training on **comprehensive multi-source datasets** wit
 Each model now trains on appropriate datasets for optimal specialization:
 
 ```bash
-# Movie-only training (uses all movie datasets)
-python neural_collaborative_filtering/src/train.py --content-type movies
+# 🎬 Hybrid Movie Model (Specialized for movies only)
+cd hybrid_recommendation_movie/hybrid_recommendation
+python train_with_wandb.py \
+  --ratings-path ../../movies/cinesync/ml-32m/ratings.csv \
+  --movies-path ../../movies/cinesync/ml-32m/movies.csv \
+  --wandb-project cinesync-v2-hybrid-movies
 
-# TV-only training (uses all TV datasets) 
-python neural_collaborative_filtering/src/train.py --content-type tv --dataset-sources tmdb netflix anime
+# 📺 Hybrid TV Model (Specialized for TV shows only)
+cd hybrid_recommendation_tv/hybrid_recommendation  
+python train_with_wandb.py \
+  --ratings-path ../../tv/misc/TMDB_tv_dataset_v3.csv \
+  --movies-path ../../tv/misc/TMDB_tv_dataset_v3.csv \
+  --wandb-project cinesync-v2-hybrid-tv
 
-# Hybrid training (combines movies and TV)
-python sequential_models/src/train.py --content-type both
+# 🧠 Neural Collaborative Filtering (Works with movies, TV, or both)
+cd neural_collaborative_filtering
+python train_with_wandb.py \
+  --ratings-path ../movies/cinesync/ml-32m/ratings.csv \
+  --movies-path ../movies/cinesync/ml-32m/movies.csv \
+  --wandb-project cinesync-v2-ncf-movies
 
-# TV-specialized model (comprehensive TV datasets)
-python hybrid_recommendation_tv/train_tv_shows.py
+# 🔄 Sequential Model (Works with movies, TV, or both)
+cd sequential_models
+python train_with_wandb.py \
+  --ratings-path ../tv/misc/TMDB_tv_dataset_v3.csv \
+  --movies-path ../tv/misc/TMDB_tv_dataset_v3.csv \
+  --wandb-project cinesync-v2-sequential-tv
 
-# Movie-specialized model (movie datasets only)
-python hybrid_recommendation_movie/train_movies.py
+# 🏗️ Two-Tower Model (Works with movies, TV, or both)
+cd two_tower_model
+python train_with_wandb.py \
+  --ratings-path ../movies/cinesync/ml-32m/ratings.csv \
+  --movies-path ../movies/cinesync/ml-32m/movies.csv \
+  --wandb-project cinesync-v2-two-tower-movies
 ```
 
 ### **🔧 Advanced Dataset Configuration**
@@ -365,42 +385,74 @@ python start_cinesync.py
 - 📈 **Analytics**: Performance comparison, user engagement, recommendation quality
 - 📤 **Upload Interface**: Drop-in model integration via web interface
 
-### **🎯 Model-Specific Training (New!)**
+### **🎯 Complete Training Commands (Updated!)**
 
-Train each model on appropriate datasets for optimal performance:
+All models now have movies and shows data paths configured properly:
 
 ```bash
-# Quick training examples with proper dataset selection
-cd cine-sync-v2
+# 🎬 Hybrid Movie Model (Movies only - specialized)
+cd hybrid_recommendation_movie/hybrid_recommendation
+python train_with_wandb.py \
+  --ratings-path ../../movies/cinesync/ml-32m/ratings.csv \
+  --movies-path ../../movies/cinesync/ml-32m/movies.csv \
+  --wandb-project cinesync-v2-hybrid-movies \
+  --epochs 100 --batch-size 512 --learning-rate 0.001
 
-# Train movie recommendation model on comprehensive movie datasets
-python hybrid_recommendation_movie/hybrid_recommendation/train_movies.py
+# 📺 Hybrid TV Model (TV shows only - specialized)
+cd hybrid_recommendation_tv/hybrid_recommendation
+python train_with_wandb.py \
+  --ratings-path ../../tv/misc/TMDB_tv_dataset_v3.csv \
+  --movies-path ../../tv/misc/TMDB_tv_dataset_v3.csv \
+  --wandb-project cinesync-v2-hybrid-tv \
+  --epochs 100 --batch-size 512 --learning-rate 0.001
 
-# Train TV recommendation model on comprehensive TV datasets  
-python hybrid_recommendation_tv/hybrid_recommendation/train_tv_shows.py
+# 🧠 NCF Model (Movies, TV, or both)
+cd neural_collaborative_filtering
+# For movies:
+python train_with_wandb.py \
+  --ratings-path ../movies/cinesync/ml-32m/ratings.csv \
+  --movies-path ../movies/cinesync/ml-32m/movies.csv \
+  --wandb-project cinesync-v2-ncf-movies
 
-# Train NCF model on movies, TV, or both
-python neural_collaborative_filtering/src/train.py --content-type movies
-python neural_collaborative_filtering/src/train.py --content-type tv
-python neural_collaborative_filtering/src/train.py --content-type both
+# For TV shows:
+python train_with_wandb.py \
+  --ratings-path ../tv/misc/TMDB_tv_dataset_v3.csv \
+  --movies-path ../tv/misc/TMDB_tv_dataset_v3.csv \
+  --wandb-project cinesync-v2-ncf-tv
 
-# Train sequential model with custom dataset sources
-python sequential_models/src/train.py --content-type tv --dataset-sources tmdb netflix anime
+# 🔄 Sequential Model (Movies, TV, or both)  
+cd sequential_models
+# For movies:
+python train_with_wandb.py \
+  --ratings-path ../movies/cinesync/ml-32m/ratings.csv \
+  --movies-path ../movies/cinesync/ml-32m/movies.csv \
+  --wandb-project cinesync-v2-sequential-movies
 
-# Advanced training with custom configuration
-python neural_collaborative_filtering/src/train.py \
-  --content-type movies \
-  --dataset-sources movielens netflix tmdb disney \
-  --epochs 50 \
-  --batch-size 4096 \
-  --embedding-dim 256
+# For TV shows:
+python train_with_wandb.py \
+  --ratings-path ../tv/misc/TMDB_tv_dataset_v3.csv \
+  --movies-path ../tv/misc/TMDB_tv_dataset_v3.csv \
+  --wandb-project cinesync-v2-sequential-tv
+
+# 🏗️ Two-Tower Model (Movies, TV, or both)
+cd two_tower_model  
+# For movies:
+python train_with_wandb.py \
+  --ratings-path ../movies/cinesync/ml-32m/ratings.csv \
+  --movies-path ../movies/cinesync/ml-32m/movies.csv \
+  --wandb-project cinesync-v2-two-tower-movies
+
+# For TV shows:
+python train_with_wandb.py \
+  --ratings-path ../tv/misc/TMDB_tv_dataset_v3.csv \
+  --movies-path ../tv/misc/TMDB_tv_dataset_v3.csv \
+  --wandb-project cinesync-v2-two-tower-tv
 ```
 
-**✅ Each model now trains on the correct content type:**
-- 🎬 **Movie models**: Use MovieLens, Netflix movies, TMDB movies, etc.
-- 📺 **TV models**: Use TMDB TV, Netflix TV, anime, IMDB series, etc.
-- 🔄 **Universal models**: Can train on movies, TV, or both combined
-- 🎯 **Smart selection**: Automatically selects optimal datasets per content type
+**✅ Model Specialization:**
+- 🎬 **Hybrid Models**: Specialized for either movies OR TV shows (not both)
+- 🧠 **NCF/Sequential/Two-Tower**: Universal models that work with movies, TV, or both
+- 📊 **Complete Commands**: See [training_commands.md](training_commands.md) for all variations
 
 ---
 
