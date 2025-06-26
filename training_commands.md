@@ -37,7 +37,7 @@ python train_with_wandb.py \
 ## 🧠 Neural Collaborative Filtering (NCF) - Movies & Shows
 **Works with both movies and TV shows**
 ```bash
-# For Movies
+# For Movies (optimized for large movie datasets)
 cd neural_collaborative_filtering
 python train_with_wandb.py \
   --ratings-path ../movies/cinesync/ml-32m/ratings.csv \
@@ -51,15 +51,26 @@ python train_with_wandb.py \
   --hidden-layers 128 64 \
   --dropout 0.2
 
-# For TV Shows (using anime dataset with actual ratings)
+# For TV Shows (specialized script with TV defaults)
+cd neural_collaborative_filtering
+python train_tv_with_wandb.py \
+  --wandb-project cinesync-v2-ncf-tv \
+  --epochs 50 \
+  --batch-size 512 \
+  --learning-rate 0.001 \
+  --embedding-dim 64 \
+  --min-ratings-user 10 \
+  --min-ratings-item 5
+
+# For TV Shows (manual paths)
 cd neural_collaborative_filtering
 python train_with_wandb.py \
   --ratings-path ../tv/misc/reviews.csv \
   --movies-path ../tv/misc/animes.csv \
   --wandb-project cinesync-v2-ncf-tv \
   --wandb-tags ncf collaborative-filtering tv-shows anime production \
-  --epochs 100 \
-  --batch-size 256 \
+  --epochs 50 \
+  --batch-size 512 \
   --learning-rate 0.001 \
   --embedding-dim 64 \
   --hidden-layers 128 64 \
@@ -83,7 +94,7 @@ python train_with_wandb.py \
 ## 🔄 Sequential Recommendation Model - Movies & Shows
 **Sequential patterns for both content types**
 ```bash
-# For Movies
+# For Movies (optimized for large movie datasets)
 cd sequential_models
 python train_with_wandb.py \
   --ratings-path ../movies/cinesync/ml-32m/ratings.csv \
@@ -99,20 +110,32 @@ python train_with_wandb.py \
   --max-seq-length 50 \
   --dropout 0.1
 
-# For TV Shows (using anime dataset with actual ratings)
+# For TV Shows (specialized script with TV defaults)
+cd sequential_models
+python train_tv_with_wandb.py \
+  --wandb-project cinesync-v2-sequential-tv \
+  --epochs 30 \
+  --batch-size 128 \
+  --learning-rate 0.001 \
+  --embedding-dim 128 \
+  --num-heads 4 \
+  --num-layers 2 \
+  --max-seq-length 30
+
+# For TV Shows (manual paths)
 cd sequential_models
 python train_with_wandb.py \
   --ratings-path ../tv/misc/reviews.csv \
   --movies-path ../tv/misc/animes.csv \
   --wandb-project cinesync-v2-sequential-tv \
   --wandb-tags sequential transformer tv-shows anime production \
-  --epochs 50 \
-  --batch-size 64 \
-  --learning-rate 0.0001 \
-  --embedding-dim 256 \
-  --num-heads 8 \
-  --num-layers 4 \
-  --max-seq-length 50 \
+  --epochs 30 \
+  --batch-size 128 \
+  --learning-rate 0.001 \
+  --embedding-dim 128 \
+  --num-heads 4 \
+  --num-layers 2 \
+  --max-seq-length 30 \
   --dropout 0.1
 
 # For Combined Dataset
@@ -135,7 +158,7 @@ python train_with_wandb.py \
 ## 🏗️ Two-Tower Model - Movies & Shows
 **Dual-tower architecture for both content types**
 ```bash
-# For Movies
+# For Movies (optimized for large movie datasets)
 cd two_tower_model
 python train_with_wandb.py \
   --ratings-path ../movies/cinesync/ml-32m/ratings.csv \
@@ -151,20 +174,32 @@ python train_with_wandb.py \
   --num-layers 4 \
   --dropout 0.1
 
-# For TV Shows (using anime dataset with actual ratings)
+# For TV Shows (specialized script with TV defaults)
+cd two_tower_model
+python train_tv_with_wandb.py \
+  --wandb-project cinesync-v2-two-tower-tv \
+  --epochs 30 \
+  --batch-size 64 \
+  --learning-rate 0.001 \
+  --embedding-dim 128 \
+  --hidden-dim 256 \
+  --num-heads 4 \
+  --num-layers 2
+
+# For TV Shows (manual paths)
 cd two_tower_model
 python train_with_wandb.py \
   --ratings-path ../tv/misc/reviews.csv \
   --movies-path ../tv/misc/animes.csv \
   --wandb-project cinesync-v2-two-tower-tv \
   --wandb-tags two-tower attention tv-shows anime production \
-  --epochs 50 \
-  --batch-size 32 \
-  --learning-rate 0.0001 \
-  --embedding-dim 256 \
-  --hidden-dim 512 \
-  --num-heads 8 \
-  --num-layers 4 \
+  --epochs 30 \
+  --batch-size 64 \
+  --learning-rate 0.001 \
+  --embedding-dim 128 \
+  --hidden-dim 256 \
+  --num-heads 4 \
+  --num-layers 2 \
   --dropout 0.1
 
 # For Combined Dataset
@@ -201,13 +236,39 @@ python train_with_wandb.py \
 
 ## 🎯 Model Specialization Summary
 
-| Model | Movies | TV Shows | Combined | Specialization |
-|-------|--------|----------|----------|----------------|
-| **Hybrid Movies** | ✅ Primary | ❌ | ❌ | Movie-focused hybrid approach |
-| **Hybrid TV** | ❌ | ✅ Primary | ❌ | TV show-focused hybrid approach |
-| **NCF** | ✅ | ✅ | ✅ | General collaborative filtering |
-| **Sequential** | ✅ | ✅ | ✅ | Temporal pattern modeling |
-| **Two-Tower** | ✅ | ✅ | ✅ | Cross-attention architecture |
+| Model | Movies | TV Shows | Combined | Movie Script | TV Script | Specialization |
+|-------|--------|----------|----------|--------------|-----------|----------------|
+| **Hybrid Movies** | ✅ Primary | ❌ | ❌ | `train_with_wandb.py` | ❌ | Movie-focused hybrid approach |
+| **Hybrid TV** | ❌ | ✅ Primary | ❌ | ❌ | `train_with_wandb.py` | TV show-focused hybrid approach |
+| **NCF** | ✅ | ✅ | ✅ | `train_with_wandb.py` | `train_tv_with_wandb.py` | General collaborative filtering |
+| **Sequential** | ✅ | ✅ | ✅ | `train_with_wandb.py` | `train_tv_with_wandb.py` | Temporal pattern modeling |
+| **Two-Tower** | ✅ | ✅ | ✅ | `train_with_wandb.py` | `train_tv_with_wandb.py` | Cross-attention architecture |
+
+## 🚀 Easy Training Options
+
+### **📺 For TV Shows/Anime (Fastest & Easiest):**
+```bash
+# NCF for TV shows (auto-detects anime dataset)
+cd neural_collaborative_filtering && python train_tv_with_wandb.py
+
+# Sequential for TV shows (optimized for smaller datasets)
+cd sequential_models && python train_tv_with_wandb.py
+
+# Two-Tower for TV shows (efficient attention)
+cd two_tower_model && python train_tv_with_wandb.py
+
+# Hybrid for TV shows (specialized)
+cd hybrid_recommendation_tv/hybrid_recommendation && python train_with_wandb.py
+```
+
+### **🎬 For Movies (Large Datasets):**
+```bash
+# All models use train_with_wandb.py with movie dataset defaults
+cd neural_collaborative_filtering && python train_with_wandb.py
+cd sequential_models && python train_with_wandb.py  
+cd two_tower_model && python train_with_wandb.py
+cd hybrid_recommendation_movie/hybrid_recommendation && python train_with_wandb.py
+```
 
 ## 🚀 Quick Start Commands
 
