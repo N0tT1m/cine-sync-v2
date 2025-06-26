@@ -314,13 +314,13 @@ def prepare_sequential_data(ratings_path, min_interactions=20, min_seq_length=5,
     else:
         ratings_df = pd.read_csv(ratings_path)
     
-    # Sort by user and timestamp
-    ratings_df = ratings_df.sort_values(['userId', 'timestamp'])
+    # Sort by user (no timestamp available in this dataset)
+    ratings_df = ratings_df.sort_values(['uid'])
     
     # Filter users with minimum interactions
-    user_counts = ratings_df['userId'].value_counts()
+    user_counts = ratings_df['uid'].value_counts()
     valid_users = user_counts[user_counts >= min_interactions].index
-    ratings_df = ratings_df[ratings_df['userId'].isin(valid_users)]
+    ratings_df = ratings_df[ratings_df['uid'].isin(valid_users)]
     
     
     # Create item encoder
@@ -332,7 +332,7 @@ def prepare_sequential_data(ratings_path, min_interactions=20, min_seq_length=5,
     user_targets = []
     max_sequences_per_user = 5  # Further limit sequences per user to prevent memory explosion
     
-    grouped = list(ratings_df.groupby('userId'))
+    grouped = list(ratings_df.groupby('uid'))
     
     for idx, (user_id, group) in enumerate(grouped):
         items = group['item_idx'].tolist()
