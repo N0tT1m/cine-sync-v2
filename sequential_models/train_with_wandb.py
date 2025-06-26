@@ -292,7 +292,7 @@ def parse_args():
     return parser.parse_args()
 
 
-def prepare_sequential_data(ratings_path, min_interactions=20, min_seq_length=5, 
+def prepare_sequential_data(ratings_path, min_interactions=5, min_seq_length=3, 
                           max_seq_length=50, test_size=0.2, val_size=0.1):
     """
     Prepare sequential data for training
@@ -319,8 +319,11 @@ def prepare_sequential_data(ratings_path, min_interactions=20, min_seq_length=5,
     
     # Filter users with minimum interactions
     user_counts = ratings_df['uid'].value_counts()
+    print(f"Total users: {len(user_counts)}")
+    print(f"Users with >= {min_interactions} interactions: {len(user_counts[user_counts >= min_interactions])}")
     valid_users = user_counts[user_counts >= min_interactions].index
     ratings_df = ratings_df[ratings_df['uid'].isin(valid_users)]
+    print(f"Filtered ratings: {len(ratings_df)}")
     
     
     # Create item encoder
@@ -359,6 +362,7 @@ def prepare_sequential_data(ratings_path, min_interactions=20, min_seq_length=5,
     
     del grouped  # Free memory
     
+    print(f"Total sequences created: {len(user_sequences)}")
     
     # Split data
     train_val_seq, test_seq, train_val_targets, test_targets = train_test_split(
