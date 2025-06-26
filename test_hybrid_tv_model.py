@@ -25,7 +25,8 @@ def load_model_and_data():
         return None, None, None, None
     
     print(f"✅ Loading model from {model_path}")
-    checkpoint = torch.load(model_path, map_location='cpu')
+    # Fix for PyTorch 2.6 weights_only security change
+    checkpoint = torch.load(model_path, map_location='cpu', weights_only=False)
     
     # Load metadata
     metadata_path = model_dir / 'hybrid_metadata.pkl'
