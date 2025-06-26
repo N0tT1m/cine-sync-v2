@@ -213,6 +213,14 @@ def parse_args():
         '/Users/timmy/workspace/ai-apps/cine-sync-v2/movies/cinesync/ml-32m/ratings.csv'
     ]
     
+    possible_movies_paths = [
+        str(Path(__file__).parent.parent / 'movies' / 'cinesync' / 'ml-32m' / 'movies.csv'),
+        '../movies/cinesync/ml-32m/movies.csv',
+        '../../movies/cinesync/ml-32m/movies.csv',
+        'movies/cinesync/ml-32m/movies.csv',
+        '/Users/timmy/workspace/ai-apps/cine-sync-v2/movies/cinesync/ml-32m/movies.csv'
+    ]
+    
     # Find first existing path
     default_ratings_path = None
     for path in possible_ratings_paths:
@@ -220,8 +228,16 @@ def parse_args():
             default_ratings_path = path
             break
     
+    default_movies_path = None
+    for path in possible_movies_paths:
+        if os.path.exists(path):
+            default_movies_path = path
+            break
+    
     parser.add_argument('--ratings-path', type=str, default=default_ratings_path,
                        help='Path to ratings CSV file')
+    parser.add_argument('--movies-path', type=str, default=default_movies_path,
+                       help='Path to movies CSV file')
     parser.add_argument('--min-interactions', type=int, default=20,
                        help='Minimum interactions per user')
     parser.add_argument('--min-seq-length', type=int, default=5,
@@ -441,7 +457,8 @@ def train_sequential_with_wandb(args):
         'min_interactions': args.min_interactions,
         'min_seq_length': args.min_seq_length,
         'max_seq_length': args.max_seq_length,
-        'ratings_path': args.ratings_path
+        'ratings_path': args.ratings_path,
+        'movies_path': args.movies_path
     }
     
     # Initialize wandb with error handling
