@@ -244,16 +244,47 @@ def prepare_data(ratings_path, device, args, min_ratings_user=20, min_ratings_it
     else:
         ratings_df = pd.read_csv(ratings_path)
     
+    print(f"Original ratings shape: {ratings_df.shape}")
+    print(f"Ratings columns: {list(ratings_df.columns)}")
+    
+    # Auto-detect column names for different datasets
+    user_col = None
+    item_col = None
+    rating_col = None
+    
+    # Detect user column
+    for col in ['userId', 'uid', 'user_id']:
+        if col in ratings_df.columns:
+            user_col = col
+            break
+    
+    # Detect item column  
+    for col in ['movieId', 'anime_uid', 'item_id', 'id']:
+        if col in ratings_df.columns:
+            item_col = col
+            break
+            
+    # Detect rating column
+    for col in ['rating', 'score', 'vote_average']:
+        if col in ratings_df.columns:
+            rating_col = col
+            break
+    
+    if not all([user_col, item_col, rating_col]):
+        raise ValueError(f"Could not detect required columns. Found: user={user_col}, item={item_col}, rating={rating_col}")
+    
+    print(f"Using columns: user={user_col}, item={item_col}, rating={rating_col}")
+    
     # Filter users and items with minimum ratings
-    user_counts = ratings_df['userId'].value_counts()
-    item_counts = ratings_df['movieId'].value_counts()
+    user_counts = ratings_df[user_col].value_counts()
+    item_counts = ratings_df[item_col].value_counts()
     
     valid_users = user_counts[user_counts >= min_ratings_user].index
     valid_items = item_counts[item_counts >= min_ratings_item].index
     
     ratings_df = ratings_df[
-        (ratings_df['userId'].isin(valid_users)) & 
-        (ratings_df['movieId'].isin(valid_items))
+        (ratings_df[user_col].isin(valid_users)) & 
+        (ratings_df[item_col].isin(valid_items))
     ]
     
     
@@ -261,8 +292,9 @@ def prepare_data(ratings_path, device, args, min_ratings_user=20, min_ratings_it
     user_encoder = LabelEncoder()
     item_encoder = LabelEncoder()
     
-    ratings_df['user_idx'] = user_encoder.fit_transform(ratings_df['userId'])
-    ratings_df['item_idx'] = item_encoder.fit_transform(ratings_df['movieId'])
+    ratings_df['user_idx'] = user_encoder.fit_transform(ratings_df[user_col])
+    ratings_df['item_idx'] = item_encoder.fit_transform(ratings_df[item_col])
+    ratings_df['rating'] = ratings_df[rating_col]  # Standardize rating column name
     
     # Get number of unique users and items
     num_users = len(user_encoder.classes_)
