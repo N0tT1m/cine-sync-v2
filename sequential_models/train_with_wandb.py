@@ -292,7 +292,7 @@ def parse_args():
     return parser.parse_args()
 
 
-def prepare_sequential_data(ratings_path, min_interactions=5, min_seq_length=3, 
+def prepare_sequential_data(ratings_path, min_interactions=1, min_seq_length=2, 
                           max_seq_length=50, test_size=0.2, val_size=0.1):
     """
     Prepare sequential data for training
