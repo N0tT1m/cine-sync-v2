@@ -189,9 +189,9 @@ def estimate_training_time():
         logger.info(f"  {stage.capitalize()}: {time_est}")
         # Extract minimum time for rough total
         if "minutes" in time_est:
-            total_min += int(time_est.split("-")[0])
+            total_min += int(time_est.split("-")[0].split()[0])
         elif "hours" in time_est:
-            total_min += int(time_est.split("-")[0]) * 60
+            total_min += int(time_est.split("-")[0].split()[0]) * 60
     
     logger.info(f"  Total (minimum): ~{total_min // 60}h {total_min % 60}m")
 
