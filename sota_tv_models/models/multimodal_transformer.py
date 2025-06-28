@@ -113,7 +113,7 @@ class MetadataEncoder(nn.Module):
         self.pos_encoding = PositionalEncoding(embed_dim)
         
         # Output projection
-        self.output_proj = nn.Linear(embed_dim, 768)  # Match RoBERTa dim
+        self.output_proj = nn.Linear(embed_dim, 1024)  # Match RoBERTa-large dim
         
     def forward(self, 
                 categorical_features: Dict[str, torch.Tensor],
@@ -158,7 +158,7 @@ class MultimodalTransformerTV(nn.Module):
     def __init__(self,
                  vocab_sizes: Dict[str, int],
                  num_shows: int,
-                 embed_dim: int = 768,
+                 embed_dim: int = 1024,
                  hidden_dim: int = 1024,
                  num_layers: int = 6,
                  num_heads: int = 12,
@@ -411,7 +411,7 @@ class TVRecommendationLoss(nn.Module):
 def get_model_config():
     """Optimized configuration for RTX 4090"""
     return {
-        'embed_dim': 768,
+        'embed_dim': 1024,
         'hidden_dim': 2048,  # Larger hidden dim for 4090
         'num_layers': 8,     # More layers
         'num_heads': 16,     # More attention heads
