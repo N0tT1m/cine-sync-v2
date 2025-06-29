@@ -259,10 +259,7 @@ class SentenceBERTTwoTowerModel(nn.Module):
     
     def __init__(
         self,
-        # Content features
-        sentence_bert_model: str = "all-MiniLM-L6-v2",
-        content_embedding_dim: int = 384,
-        
+        # Required parameters (no defaults)
         # User features
         user_categorical_dims: Dict[str, int],
         user_numerical_dim: int,
@@ -272,6 +269,11 @@ class SentenceBERTTwoTowerModel(nn.Module):
         item_categorical_dims: Dict[str, int],
         item_numerical_dim: int,
         num_items: int,
+        
+        # Optional parameters (with defaults)
+        # Content features
+        sentence_bert_model: str = "all-MiniLM-L6-v2",
+        content_embedding_dim: int = 384,
         
         # Model architecture
         embedding_dim: int = 512,
