@@ -131,9 +131,8 @@ bokeh>=3.3.0  # Interactive visualizations
 dvc>=3.26.0
 dvc[s3]>=3.26.0  # S3 backend support
 
-# Production Deployment (optional)
-triton-client>=2.38.0  # NVIDIA Triton Inference Server
-bentoml>=1.1.0  # Model serving framework
+# Production Deployment (optional) - moved to Dockerfile
+# triton-client and bentoml installed separately in Dockerfile
 
 # Development Quality Tools
 pre-commit>=3.5.0

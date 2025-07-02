@@ -43,6 +43,11 @@ RUN pip install --no-cache-dir \
     wandb \
     tensorboard
 
+# Install production deployment packages separately (optional)
+RUN pip install --no-cache-dir \
+    tritonclient[all] \
+    bentoml || echo "Some deployment packages failed to install - continuing..."
+
 # Copy the application code
 COPY . .
 
