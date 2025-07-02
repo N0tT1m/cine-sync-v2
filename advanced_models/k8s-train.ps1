@@ -14,7 +14,7 @@ param(
 $Green = "`e[92m"
 $Red = "`e[91m"
 $Yellow = "`e[93m"
-$NC = "`e[0m"  # No Color
+$NC = "`e[0m"
 
 function Write-ColorOutput {
     param([string]$Message, [string]$Color = $NC)
@@ -22,52 +22,50 @@ function Write-ColorOutput {
 }
 
 function Show-Header {
-    Write-ColorOutput "🎬 CineSync v2 Kubernetes Training Manager" $Green
-    Write-Host "=================================================="
+    Write-ColorOutput "CineSync v2 Kubernetes Training Manager" $Green
+    Write-Host "=============================================="
 }
 
 function Show-Usage {
-    Write-Host @"
-Usage: .\k8s-train.ps1 [COMMAND] [OPTIONS]
-
-Commands:
-  setup       Setup Kubernetes resources (namespace, storage, etc.)
-  build       Build Docker image for training
-  deploy      Deploy all Kubernetes resources
-  train       Run training job with specified model
-  jupyter     Start Jupyter notebook service
-  tensorboard Start TensorBoard monitoring
-  status      Check status of all resources  
-  logs        Show training logs
-  stop        Stop training job
-  clean       Clean up all resources
-  shell       Open shell in training pod
-
-Training Options (use with 'train'):
-  -Model MODEL_NAME     Model to train (default: enhanced_two_tower)
-  -Epochs N            Number of epochs (default: 10)
-  -BatchSize N         Batch size (default: auto)
-  -LearningRate FLOAT  Learning rate (default: 0.003)
-
-Examples:
-  .\k8s-train.ps1 setup
-  .\k8s-train.ps1 build
-  .\k8s-train.ps1 deploy
-  .\k8s-train.ps1 train -Model sentence_bert -Epochs 20
-  .\k8s-train.ps1 tensorboard
-  .\k8s-train.ps1 status
-  .\k8s-train.ps1 logs training-job-12345
-  .\k8s-train.ps1 clean
-"@
+    Write-Host "Usage: k8s-train.ps1 [COMMAND] [OPTIONS]"
+    Write-Host ""
+    Write-Host "Commands:"
+    Write-Host "  setup       Setup Kubernetes resources"
+    Write-Host "  build       Build Docker image for training"
+    Write-Host "  deploy      Deploy all Kubernetes resources"
+    Write-Host "  train       Run training job with specified model"
+    Write-Host "  jupyter     Start Jupyter notebook service"
+    Write-Host "  tensorboard Start TensorBoard monitoring"
+    Write-Host "  status      Check status of all resources"
+    Write-Host "  logs        Show training logs"
+    Write-Host "  stop        Stop training job"
+    Write-Host "  clean       Clean up all resources"
+    Write-Host "  shell       Open shell in training pod"
+    Write-Host ""
+    Write-Host "Training Options (use with train):"
+    Write-Host "  -Model MODEL_NAME     Model to train (default: enhanced_two_tower)"
+    Write-Host "  -Epochs N            Number of epochs (default: 10)"
+    Write-Host "  -BatchSize N         Batch size (default: auto)"
+    Write-Host "  -LearningRate FLOAT  Learning rate (default: 0.003)"
+    Write-Host ""
+    Write-Host "Examples:"
+    Write-Host "  k8s-train.ps1 setup"
+    Write-Host "  k8s-train.ps1 build"
+    Write-Host "  k8s-train.ps1 deploy"
+    Write-Host "  k8s-train.ps1 train -Model sentence_bert -Epochs 20"
+    Write-Host "  k8s-train.ps1 tensorboard"
+    Write-Host "  k8s-train.ps1 status"
+    Write-Host "  k8s-train.ps1 logs training-job-12345"
+    Write-Host "  k8s-train.ps1 clean"
 }
 
 function Test-Prerequisites {
     # Check kubectl
     try {
         kubectl version --client | Out-Null
-        Write-ColorOutput "✅ kubectl is available" $Green
+        Write-ColorOutput "kubectl is available" $Green
     } catch {
-        Write-ColorOutput "❌ kubectl not found. Please install kubectl first." $Red
+        Write-ColorOutput "kubectl not found. Please install kubectl first." $Red
         Write-Host "Download from: https://kubernetes.io/docs/tasks/tools/install-kubectl-windows/"
         exit 1
     }
@@ -75,20 +73,20 @@ function Test-Prerequisites {
     # Check Docker
     try {
         docker version | Out-Null
-        Write-ColorOutput "✅ Docker is available" $Green
+        Write-ColorOutput "Docker is available" $Green
     } catch {
-        Write-ColorOutput "⚠️  Docker not running. You'll need Docker to build images." $Yellow
+        Write-ColorOutput "Docker not running. You will need Docker to build images." $Yellow
     }
     
     # Check if running in correct directory
     if (-not (Test-Path "k8s")) {
-        Write-ColorOutput "❌ k8s directory not found. Please run from advanced_models directory." $Red
+        Write-ColorOutput "k8s directory not found. Please run from advanced_models directory." $Red
         exit 1
     }
 }
 
 function Setup-K8s {
-    Write-ColorOutput "🔧 Setting up Kubernetes resources..." $Yellow
+    Write-ColorOutput "Setting up Kubernetes resources..." $Yellow
     
     # Create namespace
     Write-Host "Creating namespace..."
@@ -98,7 +96,7 @@ function Setup-K8s {
     Write-Host "Setting up storage..."
     kubectl apply -f k8s/storage.yaml
     if ($LASTEXITCODE -ne 0) {
-        Write-ColorOutput "❌ Failed to setup storage" $Red
+        Write-ColorOutput "Failed to setup storage" $Red
         return
     }
     
@@ -106,37 +104,37 @@ function Setup-K8s {
     Write-Host "Setting up configuration..."
     kubectl apply -f k8s/configmap.yaml
     if ($LASTEXITCODE -ne 0) {
-        Write-ColorOutput "❌ Failed to setup configuration" $Red
+        Write-ColorOutput "Failed to setup configuration" $Red
         return
     }
     
-    Write-ColorOutput "✅ Kubernetes setup complete" $Green
+    Write-ColorOutput "Kubernetes setup complete" $Green
     Write-Host ""
     Write-Host "Next steps:"
-    Write-Host "1. Build Docker image: .\k8s-train.ps1 build"
-    Write-Host "2. Deploy resources: .\k8s-train.ps1 deploy"
-    Write-Host "3. Run training: .\k8s-train.ps1 train -Model your_model"
+    Write-Host "1. Build Docker image: k8s-train.ps1 build"
+    Write-Host "2. Deploy resources: k8s-train.ps1 deploy"
+    Write-Host "3. Run training: k8s-train.ps1 train -Model your_model"
 }
 
 function Build-Image {
-    Write-ColorOutput "🔨 Building Docker image..." $Yellow
+    Write-ColorOutput "Building Docker image..." $Yellow
     
     docker build -t cinesync-advanced-models:latest .
     if ($LASTEXITCODE -eq 0) {
-        Write-ColorOutput "✅ Docker image built successfully" $Green
+        Write-ColorOutput "Docker image built successfully" $Green
     } else {
-        Write-ColorOutput "❌ Docker build failed" $Red
+        Write-ColorOutput "Docker build failed" $Red
     }
 }
 
 function Deploy-Resources {
-    Write-ColorOutput "🚀 Deploying Kubernetes resources..." $Yellow
+    Write-ColorOutput "Deploying Kubernetes resources..." $Yellow
     
     kubectl apply -f k8s/storage.yaml
     kubectl apply -f k8s/configmap.yaml
     kubectl apply -f k8s/services.yaml
     
-    Write-ColorOutput "✅ Resources deployed" $Green
+    Write-ColorOutput "Resources deployed" $Green
 }
 
 function Start-Training {
@@ -157,7 +155,7 @@ function Start-Training {
         }
     }
     
-    Write-ColorOutput "🎯 Starting training job..." $Yellow
+    Write-ColorOutput "Starting training job..." $Yellow
     Write-Host "Training Configuration:"
     Write-Host "  Model: $Model"
     Write-Host "  Epochs: $Epochs"
@@ -240,41 +238,41 @@ spec:
     $jobYaml | kubectl apply -f -
     
     if ($LASTEXITCODE -eq 0) {
-        Write-ColorOutput "✅ Training job started: $jobName" $Green
+        Write-ColorOutput "Training job started: $jobName" $Green
         Write-Host ""
-        Write-Host "Monitor with: .\k8s-train.ps1 logs $jobName"
-        Write-Host "Check status: .\k8s-train.ps1 status"
+        Write-Host "Monitor with: k8s-train.ps1 logs $jobName"
+        Write-Host "Check status: k8s-train.ps1 status"
     } else {
-        Write-ColorOutput "❌ Failed to start training job" $Red
+        Write-ColorOutput "Failed to start training job" $Red
     }
 }
 
 function Start-Jupyter {
-    Write-ColorOutput "📓 Starting Jupyter notebook..." $Yellow
+    Write-ColorOutput "Starting Jupyter notebook..." $Yellow
     kubectl apply -f k8s/services.yaml
     $service = kubectl get service jupyter-service -n cinesync 2>$null
     if ($LASTEXITCODE -eq 0) {
-        Write-ColorOutput "✅ Jupyter started" $Green
+        Write-ColorOutput "Jupyter started" $Green
         Write-Host "Access at: http://localhost:30888"
     } else {
-        Write-ColorOutput "❌ Failed to start Jupyter" $Red
+        Write-ColorOutput "Failed to start Jupyter" $Red
     }
 }
 
 function Start-TensorBoard {
-    Write-ColorOutput "📊 Starting TensorBoard..." $Yellow
+    Write-ColorOutput "Starting TensorBoard..." $Yellow
     kubectl apply -f k8s/services.yaml
     $service = kubectl get service tensorboard-service -n cinesync 2>$null
     if ($LASTEXITCODE -eq 0) {
-        Write-ColorOutput "✅ TensorBoard started" $Green
+        Write-ColorOutput "TensorBoard started" $Green
         Write-Host "Access at: http://localhost:30006"
     } else {
-        Write-ColorOutput "❌ Failed to start TensorBoard" $Red
+        Write-ColorOutput "Failed to start TensorBoard" $Red
     }
 }
 
 function Show-Status {
-    Write-ColorOutput "📋 Checking status..." $Yellow
+    Write-ColorOutput "Checking status..." $Yellow
     Write-Host ""
     
     Write-Host "=== Namespace ==="
@@ -308,7 +306,7 @@ function Show-Logs {
         return
     }
     
-    Write-ColorOutput "📝 Showing logs for $ResourceName..." $Yellow
+    Write-ColorOutput "Showing logs for $ResourceName..." $Yellow
     
     # Try as job first
     kubectl logs -n cinesync -f "job/$ResourceName" 2>$null
@@ -319,25 +317,25 @@ function Show-Logs {
 }
 
 function Stop-Training {
-    Write-ColorOutput "🛑 Stopping training jobs..." $Yellow
+    Write-ColorOutput "Stopping training jobs..." $Yellow
     kubectl delete jobs -n cinesync --all
-    Write-ColorOutput "✅ Training jobs stopped" $Green
+    Write-ColorOutput "Training jobs stopped" $Green
 }
 
 function Remove-All {
-    Write-ColorOutput "🧹 Cleaning up resources..." $Yellow
+    Write-ColorOutput "Cleaning up resources..." $Yellow
     $confirm = Read-Host "This will delete ALL CineSync training resources. Are you sure? (y/N)"
     
     if ($confirm -eq 'y' -or $confirm -eq 'Y') {
         kubectl delete namespace cinesync
-        Write-ColorOutput "✅ Cleanup complete" $Green
+        Write-ColorOutput "Cleanup complete" $Green
     } else {
         Write-Host "Cleanup cancelled."
     }
 }
 
 function Open-Shell {
-    Write-ColorOutput "🐚 Opening shell in training pod..." $Yellow
+    Write-ColorOutput "Opening shell in training pod..." $Yellow
     kubectl run -it --rm debug --image=cinesync-advanced-models:latest --restart=Never -n cinesync -- bash
 }
 
@@ -362,7 +360,7 @@ switch ($Command.ToLower()) {
     "-h" { Show-Usage }
     "" { Show-Usage }
     default {
-        Write-ColorOutput "❌ Unknown command: $Command" $Red
+        Write-ColorOutput "Unknown command: $Command" $Red
         Write-Host "Use k8s-train.ps1 help for usage information."
     }
 }
