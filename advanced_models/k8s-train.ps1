@@ -301,7 +301,7 @@ function Show-Logs {
     param([string]$ResourceName)
     
     if (-not $ResourceName) {
-        Write-Host "Usage: .\k8s-train.ps1 logs [JOB_NAME|POD_NAME]"
+        Write-Host "Usage: k8s-train.ps1 logs [JOB_NAME|POD_NAME]"
         Write-Host ""
         Write-Host "Available jobs:"
         kubectl get jobs -n cinesync
@@ -363,6 +363,6 @@ switch ($Command.ToLower()) {
     "" { Show-Usage }
     default {
         Write-ColorOutput "❌ Unknown command: $Command" $Red
-        Write-Host "Use 'k8s-train.ps1 help' for usage information."
+        Write-Host "Use k8s-train.ps1 help for usage information."
     }
 }
