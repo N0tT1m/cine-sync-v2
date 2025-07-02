@@ -1,0 +1,275 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: tensorboard-service
+  namespace: cinesync
+  labels:
+    app: cinesync-training
+    component: monitoring
+spec:
+  type: NodePort
+  ports:
+  - port: 6006
+    targetPort: 6006
+    nodePort: 30006
+    protocol: TCP
+    name: tensorboard
+  selector:
+    app: tensorboard
+    component: monitoring
+
+---
+# TensorBoard Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tensorboard
+  namespace: cinesync
+  labels:
+    app: tensorboard
+    component: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tensorboard
+      component: monitoring
+  template:
+    metadata:
+      labels:
+        app: tensorboard
+        component: monitoring
+    spec:
+      containers:
+      - name: tensorboard
+        image: tensorflow/tensorflow:latest-gpu
+        command: ["tensorboard"]
+        args: 
+        - "--logdir=/logs"
+        - "--host=0.0.0.0"
+        - "--port=6006"
+        - "--reload_interval=10"
+        - "--max_reload_threads=4"
+        ports:
+        - containerPort: 6006
+          name: tensorboard
+        volumeMounts:
+        - name: logs-volume
+          mountPath: /logs
+          readOnly: true
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "2Gi"
+            cpu: "1"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 6006
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 6006
+          initialDelaySeconds: 10
+          periodSeconds: 10
+      volumes:
+      - name: logs-volume
+        persistentVolumeClaim:
+          claimName: cinesync-logs-pvc
+
+---
+# Jupyter Notebook Service (optional)
+apiVersion: v1
+kind: Service
+metadata:
+  name: jupyter-service
+  namespace: cinesync
+  labels:
+    app: cinesync-training
+    component: jupyter
+spec:
+  type: NodePort
+  ports:
+  - port: 8888
+    targetPort: 8888
+    nodePort: 30888
+    protocol: TCP
+    name: jupyter
+  selector:
+    app: jupyter
+    component: development
+
+---
+# Jupyter Notebook Deployment (optional)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jupyter
+  namespace: cinesync
+  labels:
+    app: jupyter
+    component: development
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jupyter
+      component: development
+  template:
+    metadata:
+      labels:
+        app: jupyter
+        component: development
+    spec:
+      containers:
+      - name: jupyter
+        image: cinesync-advanced-models:latest
+        imagePullPolicy: Never
+        command: ["jupyter", "notebook"]
+        args:
+        - "--ip=0.0.0.0"
+        - "--port=8888"
+        - "--no-browser"
+        - "--allow-root"
+        - "--NotebookApp.token=''"
+        - "--NotebookApp.password=''"
+        - "--NotebookApp.allow_origin='*'"
+        ports:
+        - containerPort: 8888
+          name: jupyter
+        env:
+        - name: NVIDIA_VISIBLE_DEVICES
+          value: "all"
+        - name: CUDA_VISIBLE_DEVICES
+          value: "0"
+        - name: PYTHONPATH
+          value: "/app:/app/.."
+        volumeMounts:
+        - name: app-code
+          mountPath: /app
+        - name: data-volume
+          mountPath: /app/data
+          readOnly: true
+        - name: logs-volume
+          mountPath: /app/logs
+        - name: checkpoints-volume
+          mountPath: /app/checkpoints
+        - name: outputs-volume
+          mountPath: /app/outputs
+        - name: huggingface-cache
+          mountPath: /root/.cache/huggingface
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1"
+            nvidia.com/gpu: 1
+          limits:
+            memory: "8Gi"
+            cpu: "4"
+            nvidia.com/gpu: 1
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8888
+          initialDelaySeconds: 60
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8888
+          initialDelaySeconds: 30
+          periodSeconds: 10
+      volumes:
+      - name: app-code
+        hostPath:
+          path: E:\workspace\ai-apps\cine-sync-v2\advanced_models
+          type: Directory
+      - name: data-volume
+        persistentVolumeClaim:
+          claimName: cinesync-data-pvc
+      - name: logs-volume
+        persistentVolumeClaim:
+          claimName: cinesync-logs-pvc
+      - name: checkpoints-volume
+        persistentVolumeClaim:
+          claimName: cinesync-checkpoints-pvc
+      - name: outputs-volume
+        persistentVolumeClaim:
+          claimName: cinesync-outputs-pvc
+      - name: huggingface-cache
+        persistentVolumeClaim:
+          claimName: cinesync-hf-cache-pvc
+      nodeSelector:
+        accelerator: nvidia-rtx-4090
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+
+---
+# Ingress for web services (optional)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cinesync-training-ingress
+  namespace: cinesync
+  labels:
+    app: cinesync-training
+    component: ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: tensorboard.cinesync.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: tensorboard-service
+            port:
+              number: 6006
+  - host: jupyter.cinesync.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: jupyter-service
+            port:
+              number: 8888
+
+---
+# Network Policy for training pods (optional security)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cinesync-training-netpol
+  namespace: cinesync
+spec:
+  podSelector:
+    matchLabels:
+      app: cinesync-training
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: cinesync
+    ports:
+    - protocol: TCP
+      port: 6006  # TensorBoard
+    - protocol: TCP
+      port: 8888  # Jupyter
+  egress:
+  - {} # Allow all egress for downloading models and data

@@ -1,0 +1,51 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info
+.pytest_cache
+.coverage
+
+# Virtual environments
+.venv
+venv
+env
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs and outputs
+logs/
+checkpoints/
+outputs/
+*.log
+
+# Data files (should be mounted as volume)
+data/
+*.csv
+*.json
+*.parquet
+*.h5
+*.hdf5
+
+# Documentation
+*.md
+!README.md
+
+# Temporary files
+tmp/
+temp/
+.tmp

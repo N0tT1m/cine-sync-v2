@@ -1,0 +1,246 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cinesync-training
+  namespace: cinesync
+  labels:
+    app: cinesync-training
+    component: advanced-models
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cinesync-training
+  template:
+    metadata:
+      labels:
+        app: cinesync-training
+        component: advanced-models
+    spec:
+      containers:
+      - name: training
+        image: cinesync-advanced-models:latest
+        imagePullPolicy: Never  # Use local image
+        
+        # Resource requests and limits for RTX 4090
+        resources:
+          requests:
+            memory: "8Gi"
+            cpu: "4"
+            nvidia.com/gpu: 1
+          limits:
+            memory: "32Gi"
+            cpu: "12"
+            nvidia.com/gpu: 1
+        
+        # Environment variables
+        env:
+        - name: NVIDIA_VISIBLE_DEVICES
+          value: "all"
+        - name: CUDA_VISIBLE_DEVICES
+          value: "0"
+        - name: PYTHONPATH
+          value: "/app:/app/.."
+        - name: TORCH_CUDA_ARCH_LIST
+          value: "8.6"
+        - name: PYTORCH_CUDA_ALLOC_CONF
+          value: "max_split_size_mb:512"
+        - name: WANDB_MODE
+          value: "online"
+        - name: WANDB_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: wandb-secret
+              key: api-key
+              optional: true
+        
+        # Volume mounts
+        volumeMounts:
+        - name: app-code
+          mountPath: /app
+        - name: data-volume
+          mountPath: /app/data
+          readOnly: true
+        - name: logs-volume
+          mountPath: /app/logs
+        - name: checkpoints-volume
+          mountPath: /app/checkpoints
+        - name: outputs-volume
+          mountPath: /app/outputs
+        - name: huggingface-cache
+          mountPath: /root/.cache/huggingface
+        - name: training-config
+          mountPath: /app/config
+          readOnly: true
+        
+        # Default command - can be overridden
+        command: ["python", "train_advanced_models.py"]
+        args: ["--help"]
+        
+        # Health checks
+        livenessProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - "import torch; print('Training container alive')"
+          initialDelaySeconds: 30
+          periodSeconds: 60
+          timeoutSeconds: 10
+        
+        readinessProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - "import torch; torch.cuda.is_available() and print('GPU ready') or print('CPU ready')"
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          timeoutSeconds: 5
+      
+      # Volumes
+      volumes:
+      - name: app-code
+        hostPath:
+          path: E:\workspace\ai-apps\cine-sync-v2\advanced_models
+          type: Directory
+      - name: data-volume
+        persistentVolumeClaim:
+          claimName: cinesync-data-pvc
+      - name: logs-volume
+        persistentVolumeClaim:
+          claimName: cinesync-logs-pvc
+      - name: checkpoints-volume
+        persistentVolumeClaim:
+          claimName: cinesync-checkpoints-pvc
+      - name: outputs-volume
+        persistentVolumeClaim:
+          claimName: cinesync-outputs-pvc
+      - name: huggingface-cache
+        persistentVolumeClaim:
+          claimName: cinesync-hf-cache-pvc
+      - name: training-config
+        configMap:
+          name: training-config
+      
+      # Node selection for GPU nodes
+      nodeSelector:
+        accelerator: nvidia-rtx-4090
+      
+      # Tolerations for GPU nodes
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+      
+      restartPolicy: Always
+
+---
+apiVersion: batch/v1
+kind: Job  
+metadata:
+  name: cinesync-training-job
+  namespace: cinesync
+  labels:
+    app: cinesync-training
+    component: advanced-models
+    type: job
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: cinesync-training
+        component: advanced-models
+        type: job
+    spec:
+      containers:
+      - name: training
+        image: cinesync-advanced-models:latest
+        imagePullPolicy: Never
+        
+        resources:
+          requests:
+            memory: "8Gi"
+            cpu: "4"
+            nvidia.com/gpu: 1
+          limits:
+            memory: "32Gi"
+            cpu: "12"
+            nvidia.com/gpu: 1
+        
+        env:
+        - name: NVIDIA_VISIBLE_DEVICES
+          value: "all"
+        - name: CUDA_VISIBLE_DEVICES
+          value: "0"
+        - name: PYTHONPATH
+          value: "/app:/app/.."
+        - name: TORCH_CUDA_ARCH_LIST
+          value: "8.6"
+        - name: PYTORCH_CUDA_ALLOC_CONF
+          value: "max_split_size_mb:512"
+        - name: WANDB_MODE
+          value: "online"
+        - name: WANDB_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: wandb-secret
+              key: api-key
+              optional: true
+        
+        volumeMounts:
+        - name: app-code
+          mountPath: /app
+        - name: data-volume
+          mountPath: /app/data
+          readOnly: true
+        - name: logs-volume
+          mountPath: /app/logs
+        - name: checkpoints-volume
+          mountPath: /app/checkpoints
+        - name: outputs-volume
+          mountPath: /app/outputs
+        - name: huggingface-cache
+          mountPath: /root/.cache/huggingface
+        - name: training-config
+          mountPath: /app/config
+          readOnly: true
+        
+        # This will be overridden by the batch script
+        command: ["python", "train_advanced_models.py"]
+        args: ["--model-type", "enhanced_two_tower", "--epochs", "10"]
+      
+      volumes:
+      - name: app-code
+        hostPath:
+          path: E:\workspace\ai-apps\cine-sync-v2\advanced_models
+          type: Directory
+      - name: data-volume
+        persistentVolumeClaim:
+          claimName: cinesync-data-pvc
+      - name: logs-volume
+        persistentVolumeClaim:
+          claimName: cinesync-logs-pvc
+      - name: checkpoints-volume
+        persistentVolumeClaim:
+          claimName: cinesync-checkpoints-pvc
+      - name: outputs-volume
+        persistentVolumeClaim:
+          claimName: cinesync-outputs-pvc
+      - name: huggingface-cache
+        persistentVolumeClaim:
+          claimName: cinesync-hf-cache-pvc
+      - name: training-config
+        configMap:
+          name: training-config
+      
+      nodeSelector:
+        accelerator: nvidia-rtx-4090
+      
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+      
+      restartPolicy: Never

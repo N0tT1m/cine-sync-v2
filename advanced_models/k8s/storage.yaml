@@ -1,0 +1,264 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cinesync
+  labels:
+    name: cinesync
+    component: advanced-models
+
+---
+# Storage class for fast SSD storage
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: fast-ssd
+  namespace: cinesync
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+
+---
+# PersistentVolume for data (large, read-only)
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: cinesync-data-pv
+  labels:
+    app: cinesync-training
+    component: data
+spec:
+  capacity:
+    storage: 100Gi
+  accessModes:
+    - ReadOnlyMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: fast-ssd
+  hostPath:
+    path: E:\workspace\ai-apps\cine-sync-v2\data
+    type: DirectoryOrCreate
+
+---
+# PersistentVolumeClaim for data
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cinesync-data-pvc
+  namespace: cinesync
+  labels:
+    app: cinesync-training
+    component: data
+spec:
+  accessModes:
+    - ReadOnlyMany
+  resources:
+    requests:
+      storage: 100Gi
+  storageClassName: fast-ssd
+  volumeName: cinesync-data-pv
+
+---
+# PersistentVolume for logs
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: cinesync-logs-pv
+  labels:
+    app: cinesync-training
+    component: logs
+spec:
+  capacity:
+    storage: 20Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: fast-ssd
+  hostPath:
+    path: E:\workspace\ai-apps\cine-sync-v2\advanced_models\logs
+    type: DirectoryOrCreate
+
+---
+# PersistentVolumeClaim for logs
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cinesync-logs-pvc
+  namespace: cinesync
+  labels:
+    app: cinesync-training
+    component: logs
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: fast-ssd
+  volumeName: cinesync-logs-pv
+
+---
+# PersistentVolume for checkpoints
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: cinesync-checkpoints-pv
+  labels:
+    app: cinesync-training
+    component: checkpoints
+spec:
+  capacity:
+    storage: 50Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: fast-ssd
+  hostPath:
+    path: E:\workspace\ai-apps\cine-sync-v2\advanced_models\checkpoints
+    type: DirectoryOrCreate
+
+---
+# PersistentVolumeClaim for checkpoints
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cinesync-checkpoints-pvc
+  namespace: cinesync
+  labels:
+    app: cinesync-training
+    component: checkpoints
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: fast-ssd
+  volumeName: cinesync-checkpoints-pv
+
+---
+# PersistentVolume for outputs
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: cinesync-outputs-pv
+  labels:
+    app: cinesync-training
+    component: outputs
+spec:
+  capacity:
+    storage: 30Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: fast-ssd
+  hostPath:
+    path: E:\workspace\ai-apps\cine-sync-v2\advanced_models\outputs
+    type: DirectoryOrCreate
+
+---
+# PersistentVolumeClaim for outputs
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cinesync-outputs-pvc
+  namespace: cinesync
+  labels:
+    app: cinesync-training
+    component: outputs
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 30Gi
+  storageClassName: fast-ssd
+  volumeName: cinesync-outputs-pv
+
+---
+# PersistentVolume for HuggingFace cache
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: cinesync-hf-cache-pv
+  labels:
+    app: cinesync-training
+    component: hf-cache
+spec:
+  capacity:
+    storage: 20Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: fast-ssd
+  hostPath:
+    path: E:\workspace\ai-apps\cine-sync-v2\advanced_models\.cache\huggingface
+    type: DirectoryOrCreate
+
+---
+# PersistentVolumeClaim for HuggingFace cache
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cinesync-hf-cache-pvc
+  namespace: cinesync
+  labels:
+    app: cinesync-training
+    component: hf-cache
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: fast-ssd
+  volumeName: cinesync-hf-cache-pv
+
+---
+# Secret for Weights & Biases (optional)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: wandb-secret
+  namespace: cinesync
+  labels:
+    app: cinesync-training
+    component: secrets
+type: Opaque
+stringData:
+  api-key: "your-wandb-api-key-here"
+  # To set your actual API key:
+  # kubectl create secret generic wandb-secret --from-literal=api-key=your-actual-api-key -n cinesync
+
+---
+# ConfigMap for GPU node configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gpu-node-config
+  namespace: cinesync
+  labels:
+    app: cinesync-training
+    component: gpu-config
+data:
+  # GPU node labels and taints
+  gpu-setup.yaml: |
+    # To label your GPU node:
+    # kubectl label nodes your-gpu-node-name accelerator=nvidia-rtx-4090
+    # 
+    # To taint your GPU node (optional):
+    # kubectl taint nodes your-gpu-node-name nvidia.com/gpu=true:NoSchedule
+    
+    # Verify GPU node setup:
+    # kubectl describe node your-gpu-node-name
+    
+    # Check NVIDIA device plugin:
+    # kubectl get pods -n kube-system | grep nvidia
+    
+    node_requirements:
+      - nvidia-docker-runtime
+      - nvidia-device-plugin
+      - gpu-operator (recommended)
+    
+    verification_commands:
+      - "kubectl get nodes -l accelerator=nvidia-rtx-4090"
+      - "kubectl describe node | grep nvidia.com/gpu"
+      - "kubectl get pods -n kube-system | grep nvidia"

@@ -1,0 +1,267 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: training-config
+  namespace: cinesync
+  labels:
+    app: cinesync-training
+    component: config
+data:
+  # Default training configurations
+  default-config.yaml: |
+    # CineSync Advanced Models Training Configuration
+    
+    # Model configurations
+    models:
+      enhanced_two_tower:
+        embedding_dim: 256
+        hidden_dims: [1024, 512, 256]
+        num_heads: 8
+        num_experts: 4
+        batch_size: 8192
+        learning_rate: 0.003
+        
+      sasrec:
+        embedding_dim: 256
+        hidden_size: 1024
+        num_heads: 8
+        num_blocks: 4
+        batch_size: 4096
+        learning_rate: 0.001
+        
+      enhanced_sasrec:
+        embedding_dim: 256
+        hidden_size: 1024
+        num_heads: 16
+        num_blocks: 6
+        batch_size: 4096
+        learning_rate: 0.001
+        
+      sentence_bert:
+        embedding_dim: 256
+        hidden_dims: [1024, 512, 256]
+        batch_size: 2048
+        learning_rate: 0.0005
+        
+      graph_transformer:
+        embedding_dim: 256
+        num_heads: 16
+        num_layers: 6
+        batch_size: 1024
+        learning_rate: 0.001
+        
+      lightgcn:
+        embedding_dim: 256
+        num_layers: 4
+        batch_size: 4096
+        learning_rate: 0.001
+        
+      multvae:
+        hidden_dims: [1024, 512, 256]
+        latent_dim: 256
+        batch_size: 2048
+        learning_rate: 0.001
+        
+      enhanced_multvae:
+        hidden_dims: [1024, 512, 256, 512]
+        latent_dim: 256
+        num_components: 8
+        batch_size: 2048
+        learning_rate: 0.001
+        
+      t5_hybrid:
+        embedding_dim: 256
+        hidden_dims: [1024, 512, 256]
+        batch_size: 512
+        learning_rate: 0.0001
+        
+      bert4rec:
+        hidden_size: 1024
+        num_heads: 8
+        num_layers: 4
+        batch_size: 2048
+        learning_rate: 0.001
+        
+      enhanced_bert4rec:
+        hidden_size: 1024
+        num_heads: 16
+        num_layers: 8
+        batch_size: 2048
+        learning_rate: 0.001
+        
+      graphsage:
+        embedding_dim: 256
+        hidden_dims: [1024, 512, 256]
+        num_layers: 4
+        batch_size: 2048
+        learning_rate: 0.001
+    
+    # Training settings
+    training:
+      epochs: 50
+      patience: 10
+      weight_decay: 1e-6
+      num_workers: 8
+      
+    # Performance settings for RTX 4090
+    performance:
+      max_batch_size: 16384
+      gradient_accumulation_steps: 1
+      mixed_precision: true
+      compile_model: true
+      
+    # Data paths
+    data:
+      ratings_path: "/app/data/ml-32m/ratings.csv"
+      movies_path: "/app/data/ml-32m/movies.csv"
+      
+    # Output settings
+    output:
+      save_dir: "/app/checkpoints"
+      log_dir: "/app/logs"
+      output_dir: "/app/outputs"
+      
+    # Monitoring
+    monitoring:
+      use_wandb: true
+      wandb_project: "cinesync-advanced-models"
+      tensorboard_log_dir: "/app/logs/tensorboard"
+      
+  # Environment-specific configurations
+  gpu-config.yaml: |
+    # GPU-specific optimizations
+    gpu:
+      device: "cuda"
+      memory_fraction: 0.9
+      allow_growth: true
+      
+    # CUDA optimizations
+    cuda:
+      benchmark: true
+      deterministic: false
+      enabled: true
+      
+    # Performance optimizations
+    optimizations:
+      torch_compile: true
+      channels_last: true
+      amp_enabled: true
+      gradient_checkpointing: false
+      
+  # Model-specific hyperparameters
+  hyperparameters.yaml: |
+    # Best hyperparameters for each model type
+    
+    # Graph models - require smaller batch sizes
+    graph_models:
+      - graph_transformer
+      - lightgcn  
+      - graphsage
+    graph_batch_size: 1024
+    
+    # Transformer models - memory intensive
+    transformer_models:
+      - sasrec
+      - enhanced_sasrec
+      - bert4rec
+      - enhanced_bert4rec
+      - sentence_bert
+      - t5_hybrid
+    transformer_batch_size: 2048
+    
+    # VAE models
+    vae_models:
+      - multvae
+      - enhanced_multvae
+    vae_batch_size: 4096
+    
+    # Two-tower models - can handle large batches
+    two_tower_models:
+      - enhanced_two_tower
+    two_tower_batch_size: 8192
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: training-scripts
+  namespace: cinesync
+  labels:
+    app: cinesync-training
+    component: scripts
+data:
+  # Quick training script
+  quick-train.sh: |
+    #!/bin/bash
+    set -e
+    
+    MODEL_TYPE=${1:-enhanced_two_tower}
+    EPOCHS=${2:-10}
+    BATCH_SIZE=${3:-auto}
+    
+    echo "Starting training for $MODEL_TYPE"
+    echo "Epochs: $EPOCHS"
+    echo "Batch size: $BATCH_SIZE"
+    
+    python train_advanced_models.py \
+      --model-type $MODEL_TYPE \
+      --epochs $EPOCHS \
+      --batch-size $BATCH_SIZE \
+      --use-wandb \
+      --save-dir /app/checkpoints \
+      --ratings-path /app/data/ml-32m/ratings.csv \
+      --movies-path /app/data/ml-32m/movies.csv
+      
+  # Hyperparameter tuning script
+  tune-hyperparams.sh: |
+    #!/bin/bash
+    set -e
+    
+    MODEL_TYPE=${1:-enhanced_two_tower}
+    
+    echo "Running hyperparameter tuning for $MODEL_TYPE"
+    
+    # Run multiple configurations
+    for lr in 0.001 0.003 0.005; do
+      for batch_size in 1024 2048 4096; do
+        echo "Testing lr=$lr, batch_size=$batch_size"
+        
+        python train_advanced_models.py \
+          --model-type $MODEL_TYPE \
+          --learning-rate $lr \
+          --batch-size $batch_size \
+          --epochs 5 \
+          --experiment-name "${MODEL_TYPE}_lr${lr}_bs${batch_size}" \
+          --use-wandb \
+          --save-dir /app/checkpoints \
+          --ratings-path /app/data/ml-32m/ratings.csv \
+          --movies-path /app/data/ml-32m/movies.csv
+      done
+    done
+    
+  # Model evaluation script
+  evaluate-model.sh: |
+    #!/bin/bash
+    set -e
+    
+    MODEL_PATH=${1:-/app/checkpoints/best_model.pt}
+    MODEL_TYPE=${2:-enhanced_two_tower}
+    
+    echo "Evaluating model: $MODEL_PATH"
+    echo "Model type: $MODEL_TYPE"
+    
+    python -c "
+    import torch
+    import sys
+    sys.path.append('/app')
+    from test_models import evaluate_model
+    
+    model_path = '$MODEL_PATH'
+    model_type = '$MODEL_TYPE'
+    
+    print(f'Loading model from {model_path}')
+    results = evaluate_model(model_path, model_type)
+    print('Evaluation Results:')
+    for metric, value in results.items():
+        print(f'  {metric}: {value:.4f}')
+    "
