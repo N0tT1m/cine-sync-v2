@@ -1,0 +1,74 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cinesync-training-cpu
+  namespace: cinesync
+  labels:
+    app: cinesync-training
+    component: advanced-models
+    type: cpu-job
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: cinesync-training
+        component: advanced-models
+        type: cpu-job
+    spec:
+      containers:
+      - name: training
+        image: cinesync-advanced-models:latest
+        imagePullPolicy: Never
+        
+        resources:
+          requests:
+            memory: "4Gi"
+            cpu: "2"
+          limits:
+            memory: "8Gi"
+            cpu: "4"
+        
+        env:
+        - name: CUDA_VISIBLE_DEVICES
+          value: ""
+        - name: PYTHONPATH
+          value: "/app:/app/.."
+        - name: TORCH_DEVICE
+          value: "cpu"
+        
+        volumeMounts:
+        - name: app-code
+          mountPath: /app
+        - name: checkpoints
+          mountPath: /app/checkpoints
+        - name: logs
+          mountPath: /app/logs
+        - name: outputs
+          mountPath: /app/outputs
+        - name: hf-cache
+          mountPath: /root/.cache/huggingface
+        
+        # Test command - just show help
+        command: ["python", "train_advanced_models.py"]
+        args: ["--help"]
+      
+      volumes:
+      - name: app-code
+        hostPath:
+          path: E:\workspace\ai-apps\cine-sync-v2\advanced_models
+          type: Directory
+      - name: checkpoints
+        persistentVolumeClaim:
+          claimName: cinesync-checkpoints-pvc
+      - name: logs
+        persistentVolumeClaim:
+          claimName: cinesync-logs-pvc
+      - name: outputs
+        persistentVolumeClaim:
+          claimName: cinesync-outputs-pvc
+      - name: hf-cache
+        persistentVolumeClaim:
+          claimName: cinesync-hf-cache-pvc
+      
+      restartPolicy: Never
