@@ -1,0 +1,95 @@
+version: '3.8'
+
+services:
+  training:
+    build: .
+    container_name: cinesync-training
+    
+    # GPU support
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    
+    # Environment variables
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CUDA_VISIBLE_DEVICES=0
+      - PYTHONPATH=/app:/app/..
+      - TORCH_CUDA_ARCH_LIST=8.6
+      - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
+      - WANDB_MODE=online
+    
+    # Volume mounts
+    volumes:
+      - .:/app
+      - ../data:/app/data:ro  # Mount data directory as read-only
+      - ./logs:/app/logs
+      - ./checkpoints:/app/checkpoints
+      - ./outputs:/app/outputs
+      - ~/.cache/huggingface:/root/.cache/huggingface  # Cache HuggingFace models
+    
+    # Ports for monitoring
+    ports:
+      - "6006:6006"  # TensorBoard
+      - "8080:8080"  # Additional monitoring
+    
+    # Interactive mode
+    stdin_open: true
+    tty: true
+    
+    # Default command
+    command: ["python", "train_advanced_models.py", "--help"]
+  
+  # Optional: Jupyter notebook service for development
+  jupyter:
+    build: .
+    container_name: cinesync-jupyter
+    
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CUDA_VISIBLE_DEVICES=0
+      - PYTHONPATH=/app:/app/..
+    
+    volumes:
+      - .:/app
+      - ../data:/app/data:ro
+      - ./logs:/app/logs
+      - ./checkpoints:/app/checkpoints
+      - ./outputs:/app/outputs
+      - ~/.cache/huggingface:/root/.cache/huggingface
+    
+    ports:
+      - "8888:8888"
+    
+    command: ["jupyter", "notebook", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root", "--NotebookApp.token=''"]
+    
+    profiles:
+      - jupyter  # Only start with --profile jupyter
+
+  # TensorBoard service
+  tensorboard:
+    build: .
+    container_name: cinesync-tensorboard
+    
+    volumes:
+      - ./logs:/app/logs:ro
+    
+    ports:
+      - "6007:6006"
+    
+    command: ["tensorboard", "--logdir=/app/logs", "--host=0.0.0.0", "--port=6006"]
+    
+    profiles:
+      - monitoring
