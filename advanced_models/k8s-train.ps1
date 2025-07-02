@@ -363,6 +363,6 @@ switch ($Command.ToLower()) {
     "" { Show-Usage }
     default {
         Write-ColorOutput "❌ Unknown command: $Command" $Red
-        Write-Host "Use '.\k8s-train.ps1 help' for usage information."
+        Write-Host "Use 'k8s-train.ps1 help' for usage information."
     }
 }
