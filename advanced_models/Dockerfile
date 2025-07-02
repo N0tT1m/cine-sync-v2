@@ -49,7 +49,7 @@ COPY . .
 # Set environment variables
 ENV PYTHONPATH=/app:/app/..
 ENV CUDA_VISIBLE_DEVICES=0
-ENV TORCH_CUDA_ARCH_LIST="8.6"  # RTX 4090 architecture
+ENV TORCH_CUDA_ARCH_LIST="8.6"
 ENV PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
 
 # Create necessary directories
