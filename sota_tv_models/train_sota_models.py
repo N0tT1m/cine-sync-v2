@@ -109,28 +109,127 @@ def run_gnn_training(args):
     """Run Graph Neural Network training"""
     logger.info("🕸️ Starting Graph Neural Network training...")
     
-    # For now, create a placeholder since we didn't implement the full GNN training script
-    logger.info("📝 GNN training script not fully implemented yet.")
-    logger.info("⏭️ Skipping to next stage...")
-    return True
+    script_path = Path(__file__).parent / "training" / "train_gnn.py"
+    
+    cmd = [
+        sys.executable, str(script_path),
+        "--data_path", args.processed_data_dir,
+        "--output_dir", args.models_dir,
+        "--wandb_project", args.wandb_project,
+        "--wandb_run_name", f"gnn-tv-{int(time.time())}"
+    ]
+    
+    if args.config_file:
+        cmd.extend(["--config_file", args.config_file])
+    
+    try:
+        result = subprocess.run(cmd, check=True)
+        logger.info("✅ Graph Neural Network training completed!")
+        return True
+    except subprocess.CalledProcessError as e:
+        logger.error(f"❌ GNN training failed: {e}")
+        return False
 
 def run_contrastive_training(args):
     """Run Contrastive Learning training"""
     logger.info("🔗 Starting Contrastive Learning training...")
     
-    # For now, create a placeholder since we didn't implement the full contrastive training script
-    logger.info("📝 Contrastive training script not fully implemented yet.")
-    logger.info("⏭️ Skipping to next stage...")
-    return True
+    script_path = Path(__file__).parent / "training" / "train_contrastive.py"
+    
+    cmd = [
+        sys.executable, str(script_path),
+        "--data_path", args.processed_data_dir,
+        "--output_dir", args.models_dir,
+        "--wandb_project", args.wandb_project,
+        "--wandb_run_name", f"contrastive-tv-{int(time.time())}"
+    ]
+    
+    if args.config_file:
+        cmd.extend(["--config_file", args.config_file])
+    
+    try:
+        result = subprocess.run(cmd, check=True)
+        logger.info("✅ Contrastive Learning training completed!")
+        return True
+    except subprocess.CalledProcessError as e:
+        logger.error(f"❌ Contrastive training failed: {e}")
+        return False
+
+def run_temporal_training(args):
+    """Run Temporal Attention training"""
+    logger.info("⏰ Starting Temporal Attention training...")
+    
+    script_path = Path(__file__).parent / "training" / "train_temporal.py"
+    
+    cmd = [
+        sys.executable, str(script_path),
+        "--data_path", args.processed_data_dir,
+        "--output_dir", args.models_dir,
+        "--wandb_project", args.wandb_project,
+        "--wandb_run_name", f"temporal-tv-{int(time.time())}"
+    ]
+    
+    if args.config_file:
+        cmd.extend(["--config_file", args.config_file])
+    
+    try:
+        result = subprocess.run(cmd, check=True)
+        logger.info("✅ Temporal Attention training completed!")
+        return True
+    except subprocess.CalledProcessError as e:
+        logger.error(f"❌ Temporal training failed: {e}")
+        return False
+
+def run_meta_learning_training(args):
+    """Run Meta-Learning training"""
+    logger.info("🧠 Starting Meta-Learning training...")
+    
+    script_path = Path(__file__).parent / "training" / "train_meta.py"
+    
+    cmd = [
+        sys.executable, str(script_path),
+        "--data_path", args.processed_data_dir,
+        "--output_dir", args.models_dir,
+        "--wandb_project", args.wandb_project,
+        "--wandb_run_name", f"meta-learning-tv-{int(time.time())}"
+    ]
+    
+    if args.config_file:
+        cmd.extend(["--config_file", args.config_file])
+    
+    try:
+        result = subprocess.run(cmd, check=True)
+        logger.info("✅ Meta-Learning training completed!")
+        return True
+    except subprocess.CalledProcessError as e:
+        logger.error(f"❌ Meta-learning training failed: {e}")
+        return False
 
 def run_ensemble_training(args):
     """Run Ensemble training"""
     logger.info("🎭 Starting Ensemble training...")
     
-    # For now, create a placeholder since we didn't implement the full ensemble training script
-    logger.info("📝 Ensemble training script not fully implemented yet.")
-    logger.info("⏭️ Complete - ready for inference!")
-    return True
+    script_path = Path(__file__).parent / "training" / "train_ensemble.py"
+    
+    cmd = [
+        sys.executable, str(script_path),
+        "--data_path", args.processed_data_dir,
+        "--output_dir", args.models_dir,
+        "--wandb_project", args.wandb_project,
+        "--wandb_run_name", f"ensemble-tv-{int(time.time())}"
+    ]
+    
+    if args.config_file:
+        cmd.extend(["--config_file", args.config_file])
+    
+    try:
+        result = subprocess.run(cmd, check=True)
+        logger.info("✅ Ensemble training completed!")
+        logger.info("🎉 All SOTA TV models are now ready for inference!")
+        return True
+    except subprocess.CalledProcessError as e:
+        logger.error(f"❌ Ensemble training failed: {e}")
+        return False
 
 def create_config_file(args):
     """Create optimized config for RTX 4090"""
@@ -180,7 +279,9 @@ def estimate_training_time():
         "multimodal": "2-3 hours",
         "gnn": "1-2 hours", 
         "contrastive": "1-2 hours",
-        "ensemble": "30 minutes"
+        "temporal": "1-2 hours",
+        "meta": "2-3 hours",
+        "ensemble": "30-60 minutes"
     }
     
     logger.info("⏱️ Estimated Training Times (RTX 4090):")
@@ -200,7 +301,7 @@ def main():
     
     # Stage selection
     parser.add_argument('--stage', type=str, required=True,
-                       choices=['preprocessing', 'multimodal', 'gnn', 'contrastive', 'ensemble', 'all'],
+                       choices=['preprocessing', 'multimodal', 'gnn', 'contrastive', 'temporal', 'meta', 'ensemble', 'all'],
                        help='Training stage to run')
     
     # Paths
@@ -269,7 +370,7 @@ def main():
     start_time = time.time()
     
     if args.stage == 'all':
-        stages = ['preprocessing', 'multimodal', 'gnn', 'contrastive', 'ensemble']
+        stages = ['preprocessing', 'multimodal', 'gnn', 'contrastive', 'temporal', 'meta', 'ensemble']
     else:
         stages = [args.stage]
     
@@ -287,6 +388,10 @@ def main():
             stage_success = run_gnn_training(args)
         elif stage == 'contrastive':
             stage_success = run_contrastive_training(args)
+        elif stage == 'temporal':
+            stage_success = run_temporal_training(args)
+        elif stage == 'meta':
+            stage_success = run_meta_learning_training(args)
         elif stage == 'ensemble':
             stage_success = run_ensemble_training(args)
         
