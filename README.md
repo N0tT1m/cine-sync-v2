@@ -72,22 +72,27 @@ CineSync v2 is a comprehensive AI-powered recommendation platform featuring **8 
 CineSync v2 now supports training on **comprehensive multi-source datasets** with proper content-type separation:
 
 #### **Movie Datasets Available:**
-- **MovieLens 32M**: Primary movie dataset with 32M+ ratings and user behavior
-- **Netflix Movies**: Curated movie collection from Netflix catalog  
-- **TMDB Movies**: The Movie Database with rich metadata and cast info
-- **Amazon Prime Movies**: Amazon Prime Video movie catalog
-- **Disney Movies**: Disney+ movie collection with family-friendly content
-- **Box Office Data**: Revenue and performance metrics
-- **Metacritic Movies**: Professional critic reviews and scores
+- **MovieLens 32M**: Primary movie dataset with 32M+ ratings and user behavior (`movies/cinesync/ml-32m/`)
+- **Netflix Movies**: Curated movie collection from Netflix catalog (`movies/netflix/`)
+- **TMDB Movies**: The Movie Database with rich metadata and cast info (`movies/tmdb/`, `movies/tmdb-movies/`)
+- **Amazon Prime Movies**: Amazon Prime Video movie catalog (`movies/amazon/`)
+- **Disney Movies**: Disney+ movie collection with family-friendly content (`movies/disney/`)
+- **Box Office Data**: Revenue and performance metrics (`movies/boxoffice/`)
+- **Metacritic Movies**: Professional critic reviews and scores (`movies/metacritic/`)
+- **Rotten Tomatoes**: Critic reviews and movie ratings (`movies/rotten/`)
+- **Streaming Platform Data**: Multi-platform movie availability (`movies/streaming/`)
+- **HetRec Movie Data**: Rich movie metadata with social features (`movies/hetrec/`)
+- **Archive Data**: Netflix Prize dataset for training (`movies/archive/`)
 
 #### **TV Show Datasets Available:**
-- **TMDB TV Shows**: Comprehensive TV series database with episode details
-- **Netflix TV Shows**: Complete Netflix TV catalog with seasonal data
-- **Amazon Prime TV**: Amazon Prime Video series collection
-- **Disney+ TV Shows**: Disney+ exclusive and licensed TV content
-- **Anime Database**: Specialized anime series with user ratings and reviews
-- **IMDB TV Series**: 22+ genre-specific TV series datasets
-- **Metacritic TV**: Professional TV show reviews and ratings
+- **TMDB TV Shows**: Comprehensive TV series database with episode details (`tv/tmdb/`, `tv/misc/TMDB_tv_dataset_v3.csv`)
+- **Netflix TV Shows**: Complete Netflix TV catalog with seasonal data (`tv/netflix/`)
+- **Amazon Prime TV**: Amazon Prime Video series collection (`tv/amazon/`)
+- **Disney+ TV Shows**: Disney+ exclusive and licensed TV content (`tv/misc/disney_plus_tv_shows.csv`)
+- **Anime Database**: Specialized anime series with user ratings and reviews (`tv/anime/`)
+- **IMDB TV Series**: 22+ genre-specific TV series datasets (`tv/imdb/`, `tv/imdb-loose/`)
+- **Metacritic TV**: Professional TV show reviews and ratings (`tv/misc/metacritic_tv.csv`)
+- **TMDB TV Actors**: Actor information for TV shows (`tv/misc/tmdb_tv_actors.csv`)
 
 ### **🎯 Content-Type Specific Training**
 
@@ -157,9 +162,9 @@ model_manager.update_training_preferences({
 
 | Content Type | Total Items | Ratings/Reviews | Sources | Coverage |
 |--------------|-------------|-----------------|---------|----------|
-| **Movies** | 180K+ movies | 32M+ ratings | 7 major sources | 95%+ popular movies |
-| **TV Shows** | 120K+ series | 15M+ synthetic | 6 major sources | 90%+ popular series |
-| **Combined** | 300K+ items | 47M+ interactions | 13 sources | Global coverage |
+| **Movies** | 200K+ movies | 32M+ ratings | 11 major sources | 95%+ popular movies |
+| **TV Shows** | 150K+ series | 20M+ synthetic | 8 major sources | 90%+ popular series |
+| **Combined** | 350K+ items | 52M+ interactions | 19 sources | Global coverage |
 
 ---
 
@@ -655,6 +660,11 @@ movies/netflix/netflix_movies.csv          # Netflix catalog
 movies/tmdb-movies/movies_metadata.csv     # Rich metadata
 movies/amazon/amazon_prime_titles.csv      # Amazon catalog
 movies/disney/disney_plus_movies.csv       # Disney catalog
+movies/rotten/rotten_tomatoes_movies.csv   # Rotten Tomatoes data
+movies/streaming/MoviesOnStreamingPlatforms.csv # Multi-platform data
+movies/boxoffice/Mojo_budget_data.csv      # Box office metrics
+movies/hetrec/movies.dat                    # HetRec movie data
+movies/archive/movie_titles.csv            # Netflix Prize data
 ```
 
 #### **Required TV Datasets**
@@ -666,8 +676,12 @@ tv/misc/TMDB_tv_dataset_v3.csv            # Comprehensive TV database
 tv/netflix/netflix_titles.csv             # Netflix TV catalog
 tv/amazon/amazon_prime_tv_shows.csv       # Amazon TV catalog
 tv/anime/animes.csv                        # Anime database
+tv/misc/disney_plus_tv_shows.csv          # Disney+ TV shows
+tv/misc/metacritic_tv.csv                 # TV show reviews
+tv/misc/tmdb_tv_actors.csv                # TV actor information
 tv/imdb/action_series.csv                  # IMDB genre files
-tv/imdb/comedy_series.csv                  # (22+ genre files)
+tv/imdb/comedy_series.csv                  # (22+ genre files available)
+tv/imdb-loose/action_series.csv           # Extended IMDB data
 ```
 
 ### **🎛️ Configuration Files**
