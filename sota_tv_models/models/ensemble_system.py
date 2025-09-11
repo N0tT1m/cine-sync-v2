@@ -17,6 +17,8 @@ import pickle
 from .multimodal_transformer import MultimodalTransformerTV
 from .graph_neural_network import TVGraphRecommender
 from .contrastive_learning import ContrastiveTVModel
+from .temporal_attention import TemporalAttentionTVModel
+from .meta_learning import MetaLearningTVAdapter
 
 logger = logging.getLogger(__name__)
 
