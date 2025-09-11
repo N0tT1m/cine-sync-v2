@@ -1,0 +1,20 @@
+{
+  "title": "CineSync Deep Learning Recommendation Models",
+  "id": "nott1m/cinesync-deep-learning-recommendation-models",
+  "licenses": [
+    {
+      "name": "CC0-1.0"
+    }
+  ],
+  "description": "Complete implementation of NCF, Sequential, and Two-Tower recommendation models with training code",
+  "keywords": [
+    "recommendation",
+    "machine-learning",
+    "deep-learning",
+    "pytorch",
+    "movies",
+    "ai"
+  ],
+  "collaborators": [],
+  "data": []
+}
