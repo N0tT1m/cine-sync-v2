@@ -39,6 +39,7 @@
 !dataset-metadata.json
 !requirements.txt
 !*.md
+!sota_tv_outputs/rtx4090_config.json
 
 # Environment variables and sensitive configuration
 .env
