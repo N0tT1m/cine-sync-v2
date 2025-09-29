@@ -509,7 +509,7 @@ def main():
     )
     
     # Setup tokenizer
-    tokenizer = RobertaTokenizer.from_pretrained('roberta-base')
+    tokenizer = RobertaTokenizer.from_pretrained('roberta-large')
     
     # Create datasets
     train_dataset = TVShowDataset(
