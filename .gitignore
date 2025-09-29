@@ -52,7 +52,6 @@ config.secret.py
 secrets.py
 
 # Database backups and logs
-*.sql
 *.log
 *.db
 *.sqlite3

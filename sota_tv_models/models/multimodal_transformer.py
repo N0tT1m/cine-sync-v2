@@ -113,7 +113,7 @@ class MetadataEncoder(nn.Module):
         self.pos_encoding = PositionalEncoding(embed_dim)
         
         # Output projection
-        self.output_proj = nn.Linear(embed_dim, 768)  # Match RoBERTa-base dim
+        self.output_proj = nn.Linear(embed_dim, 1024)  # Match RoBERTa-large dim
         
     def forward(self, 
                 categorical_features: Dict[str, torch.Tensor],
@@ -158,10 +158,10 @@ class MultimodalTransformerTV(nn.Module):
     def __init__(self,
                  vocab_sizes: Dict[str, int],
                  num_shows: int,
-                 embed_dim: int = 768,
+                 embed_dim: int = 1024,
                  hidden_dim: int = 1024,
                  num_layers: int = 6,
-                 num_heads: int = 12,
+                 num_heads: int = 16,
                  dropout: float = 0.1,
                  use_gradient_checkpointing: bool = True):
         super().__init__()
@@ -170,7 +170,7 @@ class MultimodalTransformerTV(nn.Module):
         self.use_gradient_checkpointing = use_gradient_checkpointing
         
         # Text encoder (RoBERTa)
-        self.text_encoder = RobertaModel.from_pretrained('roberta-base')
+        self.text_encoder = RobertaModel.from_pretrained('roberta-large')
         if use_gradient_checkpointing:
             self.text_encoder.gradient_checkpointing_enable()
         
@@ -409,12 +409,12 @@ class TVRecommendationLoss(nn.Module):
 
 # Model configuration for RTX 4090 optimization
 def get_model_config():
-    """Optimized configuration for RTX 4090 with RoBERTa-base"""
+    """Optimized configuration for RTX 4090 with RoBERTa-large"""
     return {
-        'embed_dim': 768,    # Match RoBERTa-base
+        'embed_dim': 1024,   # Match RoBERTa-large
         'hidden_dim': 2048,  # Larger hidden dim for 4090
         'num_layers': 8,     # More layers
-        'num_heads': 12,     # Match RoBERTa-base heads (768/64=12)
+        'num_heads': 16,     # Match RoBERTa-large heads (1024/64=16)
         'dropout': 0.1,
         'use_gradient_checkpointing': True,  # Essential for memory efficiency
         'batch_size': 32,    # Large batch size for 4090

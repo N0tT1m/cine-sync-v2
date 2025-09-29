@@ -39,18 +39,38 @@ class TVGraphDataset:
         self.processed_data_dir = Path(processed_data_dir)
         self.device = device
         
-        # Load graph data
-        self.graph_data = torch.load(self.processed_data_dir / 'graph_data.pt', map_location=device)
+        # Check if graph data exists, if not run preprocessing
+        graph_data_path = self.processed_data_dir / 'graph_data.pt'
+        if not graph_data_path.exists():
+            logger.error(f"Graph data file not found: {graph_data_path}")
+            logger.info("Please run data preprocessing first:")
+            logger.info("python sota_tv_models/data/tv_preprocessor.py --output_dir sota_tv_outputs/processed_data")
+            raise FileNotFoundError(f"Graph data file not found: {graph_data_path}. Please run preprocessing first.")
         
-        # Load metadata
-        with open(self.processed_data_dir / 'metadata.json') as f:
+        # Load graph data
+        self.graph_data = torch.load(graph_data_path, map_location=device)
+        
+        # Check and load metadata
+        metadata_path = self.processed_data_dir / 'metadata.json'
+        if not metadata_path.exists():
+            raise FileNotFoundError(f"Metadata file not found: {metadata_path}. Please run preprocessing first.")
+        
+        with open(metadata_path) as f:
             self.metadata = json.load(f)
         
-        # Load training data for node features
-        with open(self.processed_data_dir / 'train_data.json') as f:
+        # Check and load training data for node features
+        train_data_path = self.processed_data_dir / 'train_data.json'
+        if not train_data_path.exists():
+            raise FileNotFoundError(f"Training data file not found: {train_data_path}. Please run preprocessing first.")
+            
+        with open(train_data_path) as f:
             self.train_data = json.load(f)
         
-        with open(self.processed_data_dir / 'val_data.json') as f:
+        val_data_path = self.processed_data_dir / 'val_data.json'
+        if not val_data_path.exists():
+            raise FileNotFoundError(f"Validation data file not found: {val_data_path}. Please run preprocessing first.")
+            
+        with open(val_data_path) as f:
             self.val_data = json.load(f)
         
         logger.info(f"Loaded graph with {self.metadata['vocab_sizes']} vocabulary sizes")
