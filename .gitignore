@@ -13,21 +13,28 @@
 *.pt 2
 *.pkl
 *.pth
+*.onnx
+*.safetensors
 
-# Allow all Python model files
+# Model checkpoints and outputs
+checkpoints/
+logs/
+outputs/
+*/checkpoints/
+*/logs/
+*/outputs/
+movie_llm_checkpoints/
+
+# Allow all Python model files (keep source code)
 !/models/*.py
-!/lupe(python)/models/*.py
-!/advanced_models/*.py
-!/neural_collaborative_filtering/**/*.py
-!/sequential_models/**/*.py
-!/two_tower_model/**/*.py
-!/hybrid_recommendation/**/*.py
+!/services/lupe_python/models/*.py
+!/src/models/**/*.py
 
 # But exclude large trained model files
 /models/*.pt
 /models/*.pkl
-/lupe(python)/models/*.pt
-/lupe(python)/models/*.pkl
+/services/lupe_python/models/*.pt
+/services/lupe_python/models/*.pkl
 
 # Data files (too large for git)
 *.csv
@@ -97,13 +104,14 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-# Virtual environments
+# Virtual environments (all common patterns)
 .venv/
 venv/
 ENV/
 env/
 .env/
 test_env/
+*.venv
 
 # Rust build artifacts
 /target/
@@ -117,5 +125,6 @@ Cargo.lock
 # PyCharm
 .idea/
 
-# Wandb artifacts
+# Wandb artifacts (experiment tracking - should not be in git)
 wandb/
+*.wandb
