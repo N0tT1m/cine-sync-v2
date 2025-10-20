@@ -20,6 +20,65 @@
 
 ---
 
+## 📁 Project Structure
+
+The project follows a clean, organized architecture for easy navigation and maintenance:
+
+```
+cine-sync-v2/
+├── src/                              # Core library code
+│   ├── models/                       # AI model implementations
+│   │   ├── advanced/                 # SOTA models (BERT4Rec, GraphSAGE, T5, VAE, Transformers)
+│   │   ├── collaborative/            # Neural Collaborative Filtering (NCF)
+│   │   ├── sequential/               # Sequential models (LSTM/GRU)
+│   │   ├── two_tower/                # Two-tower dual-encoder architecture
+│   │   └── hybrid/                   # Hybrid recommendation systems
+│   │       ├── movie/                # Movie-specific hybrid models
+│   │       ├── tv/                   # TV show-specific hybrid models
+│   │       ├── sota_tv/              # State-of-the-art TV models
+│   │       └── sota_tv_outputs/      # TV model outputs
+│   ├── data/                         # Data processing & loading
+│   │   └── rust_dataloader/          # High-performance Rust-based dataloader
+│   ├── api/                          # API endpoints and web interface
+│   │   └── templates/                # Web dashboard templates
+│   ├── monitoring/                   # WandB integration & experiment tracking
+│   └── utils/                        # Utility functions
+│
+├── scripts/                          # Executable scripts
+│   ├── training/                     # Training scripts (enhanced, distributed, optimized)
+│   ├── testing/                      # Test suites for all models
+│   ├── deployment/                   # Production deployment scripts
+│   └── utilities/                    # Helper scripts (upload, validation, generation)
+│
+├── configs/                          # Configuration files
+│   ├── deployment/                   # Docker, PostgreSQL, database configs
+│   ├── models/                       # Model-specific configurations
+│   └── training/                     # Training configurations
+│
+├── services/                         # Microservices
+│   ├── lupe/                         # Discord bot (Rust)
+│   ├── lupe-server/                  # Inference server (Rust)
+│   └── lupe_python/                  # Python service implementation
+│
+├── docs/                             # Documentation
+│   ├── ENHANCEMENT_ROADMAP.md        # Feature roadmap
+│   ├── MODEL_IMPROVEMENT_PLAN.md     # Model optimization guide
+│   ├── QUICK_WINS.md                 # Quick optimization tips
+│   └── *.md                          # Additional documentation
+│
+├── models/                           # Trained model checkpoints
+├── datasets/                         # Training data (movies/, tv/)
+└── notebooks/                        # Jupyter notebooks for experimentation
+```
+
+### Key Features of the Structure:
+- **Modular Design**: Clear separation between models, data, APIs, and scripts
+- **Standardized Layout**: Each model family follows consistent `src/`, `notebooks/`, `tests/` structure
+- **Easy Navigation**: Related functionality grouped together
+- **Production Ready**: Separate configs for deployment, training, and development
+
+---
+
 ## 🌟 Platform Overview
 
 CineSync v2 is a comprehensive AI-powered recommendation platform featuring **8 distinct deep learning models**, **unified model management**, **web-based admin interface**, and **production-ready integrations**. Built for scalability, the platform processes **150M+ ratings** across movies, TV shows, and streaming platforms to deliver personalized content discovery.
