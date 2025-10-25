@@ -19,12 +19,16 @@ logger = logging.getLogger(__name__)
 
 def get_db_connection():
     """Get database connection"""
+    password = os.getenv("DB_PASSWORD")
+    if not password:
+        raise ValueError("DB_PASSWORD environment variable must be set")
+
     return psycopg2.connect(
         host=os.getenv("DB_HOST", "localhost"),
         port=int(os.getenv("DB_PORT", "5432")),
         database=os.getenv("DB_NAME", "cinesync"),
         user=os.getenv("DB_USER", "postgres"),
-        password=os.getenv("DB_PASSWORD", "Babycakes15")
+        password=password
     )
 
 def check_column_exists(cursor, table_name, column_name):

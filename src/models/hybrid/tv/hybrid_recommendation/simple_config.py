@@ -12,16 +12,19 @@ class DatabaseConfig:
     port: int = 5432
     database: str = "cinesync"
     user: str = "postgres"
-    password: str = "postgres"
+    password: str = ""  # Must be set via DB_PASSWORD environment variable
     
     @classmethod
     def from_env(cls):
+        password = os.getenv("DB_PASSWORD", "")
+        if not password:
+            raise ValueError("DB_PASSWORD environment variable must be set")
         return cls(
             host=os.getenv("DB_HOST", "localhost"),
             port=int(os.getenv("DB_PORT", "5432")),
             database=os.getenv("DB_NAME", "cinesync"),
             user=os.getenv("DB_USER", "postgres"),
-            password=os.getenv("DB_PASSWORD", "postgres")
+            password=password
         )
 
 

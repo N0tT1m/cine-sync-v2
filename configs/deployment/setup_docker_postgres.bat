@@ -53,12 +53,19 @@ echo.
 
 REM Create .env file for the application
 echo Creating .env file with Docker configuration...
+echo NOTE: Please edit .env file and set a secure password!
 (
 echo DB_HOST=localhost
 echo DB_NAME=cinesync
 echo DB_USER=postgres
-echo DB_PASSWORD=Babycakes15
+echo DB_PASSWORD=CHANGE_THIS_PASSWORD
 echo DB_PORT=5432
+echo.
+echo # PostgreSQL Docker Configuration
+echo POSTGRES_DB=cinesync
+echo POSTGRES_USER=postgres
+echo POSTGRES_PASSWORD=CHANGE_THIS_PASSWORD
+echo.
 echo DISCORD_TOKEN=
 echo DEBUG=true
 ) > .env
@@ -70,11 +77,15 @@ echo @echo off
 echo set DB_HOST=localhost
 echo set DB_NAME=cinesync
 echo set DB_USER=postgres
-echo set DB_PASSWORD=Babycakes15
+echo set DB_PASSWORD=CHANGE_THIS_PASSWORD
+echo set POSTGRES_DB=cinesync
+echo set POSTGRES_USER=postgres
+echo set POSTGRES_PASSWORD=CHANGE_THIS_PASSWORD
 echo set DB_PORT=5432
 echo set DISCORD_TOKEN=
 echo set DEBUG=true
 echo echo Environment variables set for current session.
+echo echo WARNING: Please set secure passwords before use!
 echo echo Please set DISCORD_TOKEN manually: set DISCORD_TOKEN=your_token_here
 ) > set_env.bat
 
@@ -98,7 +109,8 @@ echo Database: cinesync
 echo Host: localhost
 echo Port: 5432
 echo User: postgres
-echo Password: Babycakes15
+echo.
+echo IMPORTANT: Edit .env file and set secure passwords!
 echo.
 echo Next steps:
 echo 1. Set your Discord bot token: set DISCORD_TOKEN=your_token_here

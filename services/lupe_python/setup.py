@@ -71,7 +71,7 @@ def setup_environment():
     print("   - Host: localhost:5432")
     print("   - Database: cinesync")
     print("   - User: postgres")
-    print("   - Password: Babycakes15")
+    print("   - Password: (set in .env file)")
     print("\n3. Start the bot:")
     if os.name == 'nt':
         print("   .venv\\Scripts\\python main.py")
@@ -92,7 +92,7 @@ DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=cinesync
 DB_USER=postgres
-DB_PASSWORD=Babycakes15
+DB_PASSWORD=your_secure_database_password_here
 
 # Model Configuration
 MODELS_DIR=../models
