@@ -81,7 +81,7 @@ python migrate_database.py
    DB_PORT=5432
    DB_NAME=cinesync
    DB_USER=postgres
-   DB_PASSWORD=Babycakes15
+   DB_PASSWORD=your_secure_database_password_here
    ```
 
 ### 3. Discord Bot Issues

@@ -19,14 +19,18 @@ from run_training_pytorch import (
     process_and_prepare_data, log_gpu_memory
 )
 
-# Database configuration (same as Discord bot)
+# Database configuration - Load from environment variables
 DB_CONFIG = {
-    'host': '192.168.1.78',
-    'database': 'postgres',
-    'user': 'postgres',
-    'password': 'password',
-    'port': 5432
+    'host': os.getenv('DB_HOST', 'localhost'),
+    'database': os.getenv('DB_NAME', 'cinesync'),
+    'user': os.getenv('DB_USER', 'postgres'),
+    'password': os.getenv('DB_PASSWORD'),  # Must be set via environment
+    'port': int(os.getenv('DB_PORT', '5432'))
 }
+
+# Validate required environment variables
+if not DB_CONFIG['password']:
+    raise ValueError("DB_PASSWORD environment variable must be set")
 
 # Set up logging
 logging.basicConfig(
