@@ -719,8 +719,9 @@ class UnifiedDataset(Dataset):
             },
         }
 
-        # TV-specific model schemas
+        # TV-specific model schemas (must match trainer.train_step() batch keys)
         tv_schemas = {
+            # Models without custom trainers (use generic trainer)
             'tv_temporal_attention': {
                 'user_ids': {'type': 'int', 'max': 50000},
                 'show_ids': {'type': 'int_seq', 'max': 50000, 'seq_len': 20},
@@ -754,55 +755,83 @@ class UnifiedDataset(Dataset):
                 'show_ids': {'type': 'int', 'max': 50000},
                 'ratings': {'type': 'float', 'min': 1, 'max': 5},
             },
+            # Models WITH custom trainers
             'tv_episode_sequence': {
                 'user_ids': {'type': 'int', 'max': 50000},
                 'show_ids': {'type': 'int', 'max': 50000},
-                'episode_ids': {'type': 'int_seq', 'max': 10000, 'seq_len': 20},
+                'episode_positions': {'type': 'int_seq', 'max': 500, 'seq_len': 20},
+                'season_ids': {'type': 'int_seq', 'max': 30, 'seq_len': 20},
+                'episode_types': {'type': 'int_seq', 'max': 10, 'seq_len': 20},
+                'episode_features': {'type': 'float_seq', 'seq_len': 20},
                 'ratings': {'type': 'float', 'min': 1, 'max': 5},
             },
             'tv_binge_prediction': {
                 'user_ids': {'type': 'int', 'max': 50000},
                 'show_ids': {'type': 'int', 'max': 50000},
-                'episode_counts': {'type': 'int', 'max': 100},
-                'binge_label': {'type': 'bool'},
+                'session_duration': {'type': 'float', 'min': 0, 'max': 24},
+                'time_of_day': {'type': 'int', 'max': 24},
+                'day_of_week': {'type': 'int', 'max': 7},
+                'session_types': {'type': 'int', 'max': 10},
+                'cliffhanger_scores': {'type': 'float', 'min': 0, 'max': 1},
+                'length_features': {'type': 'float_seq', 'seq_len': 4},
+                'structure_types': {'type': 'int', 'max': 10},
+                'release_patterns': {'type': 'int', 'max': 5},
                 'ratings': {'type': 'float', 'min': 1, 'max': 5},
             },
             'tv_series_completion': {
                 'user_ids': {'type': 'int', 'max': 50000},
                 'show_ids': {'type': 'int', 'max': 50000},
-                'episodes_watched': {'type': 'int', 'max': 500},
-                'total_episodes': {'type': 'int', 'max': 500},
+                'progress_features': {'type': 'float_seq', 'seq_len': 8},
+                'engagement_types': {'type': 'int', 'max': 10},
+                'gap_features': {'type': 'float_seq', 'seq_len': 4},
                 'completed': {'type': 'bool'},
-                'ratings': {'type': 'float', 'min': 1, 'max': 5},
             },
             'tv_season_quality': {
                 'user_ids': {'type': 'int', 'max': 50000},
                 'show_ids': {'type': 'int', 'max': 50000},
-                'season_ids': {'type': 'int', 'max': 30},
+                'season_positions': {'type': 'int', 'max': 30},
+                'quality_features': {'type': 'float_seq', 'seq_len': 8},
+                'season_types': {'type': 'int', 'max': 10},
+                'change_features': {'type': 'float_seq', 'seq_len': 8},
                 'ratings': {'type': 'float', 'min': 1, 'max': 5},
             },
             'tv_platform_availability': {
                 'user_ids': {'type': 'int', 'max': 50000},
                 'show_ids': {'type': 'int', 'max': 50000},
                 'platform_ids': {'type': 'int', 'max': 50},
+                'platform_types': {'type': 'int', 'max': 10},
+                'platform_features': {'type': 'float_seq', 'seq_len': 8},
+                'region_ids': {'type': 'int', 'max': 200},
                 'ratings': {'type': 'float', 'min': 1, 'max': 5},
             },
             'tv_watch_pattern': {
                 'user_ids': {'type': 'int', 'max': 50000},
                 'show_ids': {'type': 'int', 'max': 50000},
-                'watch_times': {'type': 'int_seq', 'max': 24, 'seq_len': 10},
+                'hours': {'type': 'int', 'max': 24},
+                'days': {'type': 'int', 'max': 7},
+                'months': {'type': 'int', 'max': 12},
+                'durations': {'type': 'float', 'min': 0, 'max': 24},
+                'gaps': {'type': 'float', 'min': 0, 'max': 365},
+                'habit_types': {'type': 'int', 'max': 10},
+                'consistency_features': {'type': 'float_seq', 'seq_len': 8},
+                'parallel_features': {'type': 'float_seq', 'seq_len': 4},
                 'ratings': {'type': 'float', 'min': 1, 'max': 5},
             },
             'tv_series_lifecycle': {
                 'user_ids': {'type': 'int', 'max': 50000},
                 'show_ids': {'type': 'int', 'max': 50000},
-                'lifecycle_stage': {'type': 'int', 'max': 5},
+                'stage_ids': {'type': 'int', 'max': 10},
+                'health_features': {'type': 'float_seq', 'seq_len': 8},
+                'network_status': {'type': 'int', 'max': 10},
                 'ratings': {'type': 'float', 'min': 1, 'max': 5},
             },
             'tv_cast_migration': {
                 'user_ids': {'type': 'int', 'max': 50000},
                 'show_ids': {'type': 'int', 'max': 50000},
-                'cast_ids': {'type': 'int_seq', 'max': 100000, 'seq_len': 10},
+                'actor_ids': {'type': 'int_seq', 'max': 100000, 'seq_len': 10},
+                'role_types': {'type': 'int_seq', 'max': 10, 'seq_len': 10},
+                'status_ids': {'type': 'int_seq', 'max': 10, 'seq_len': 10},
+                'screen_time': {'type': 'float_seq', 'seq_len': 10},
                 'ratings': {'type': 'float', 'min': 1, 'max': 5},
             },
         }
@@ -867,14 +896,44 @@ class UnifiedDataset(Dataset):
 
 
 def collate_fn(batch: List[Dict]) -> Dict[str, torch.Tensor]:
-    """Collate function for DataLoader"""
+    """Collate function for DataLoader - handles various data types"""
     collated = {}
     for key in batch[0].keys():
         values = [item[key] for item in batch]
-        if isinstance(values[0], torch.Tensor):
-            collated[key] = torch.stack(values)
-        else:
-            collated[key] = torch.tensor(values)
+        first_val = values[0]
+
+        try:
+            if isinstance(first_val, torch.Tensor):
+                collated[key] = torch.stack(values)
+            elif isinstance(first_val, np.ndarray):
+                # Handle numpy arrays (1D or 2D)
+                stacked = np.stack(values)
+                if stacked.dtype == np.float64:
+                    collated[key] = torch.from_numpy(stacked.astype(np.float32))
+                elif stacked.dtype == np.int64:
+                    collated[key] = torch.from_numpy(stacked)
+                else:
+                    collated[key] = torch.from_numpy(stacked)
+            elif isinstance(first_val, (list, tuple)):
+                # Handle lists/tuples - convert to tensor
+                arr = np.array(values)
+                if arr.dtype == np.float64:
+                    collated[key] = torch.from_numpy(arr.astype(np.float32))
+                else:
+                    collated[key] = torch.from_numpy(arr)
+            elif isinstance(first_val, float):
+                collated[key] = torch.tensor(values, dtype=torch.float32)
+            elif isinstance(first_val, (int, np.integer)):
+                collated[key] = torch.tensor(values, dtype=torch.long)
+            elif isinstance(first_val, bool):
+                collated[key] = torch.tensor(values, dtype=torch.float32)
+            else:
+                # Fallback - try to convert directly
+                collated[key] = torch.tensor(values)
+        except Exception as e:
+            logger.warning(f"Could not collate key '{key}': {e}. Skipping.")
+            continue
+
     return collated
 
 
@@ -1099,6 +1158,43 @@ class UnifiedTrainingPipeline:
         return {'model_name': self.model_name, 'best_val_loss': best_val_loss,
                 'history': history, 'epochs_trained': epoch + 1}
 
+    def _estimate_model_memory(self, model: nn.Module) -> float:
+        """Estimate model memory usage in GB"""
+        param_size = sum(p.numel() * p.element_size() for p in model.parameters())
+        buffer_size = sum(b.numel() * b.element_size() for b in model.buffers())
+        # Rough estimate: model + gradients + optimizer states = ~4x parameters
+        total_bytes = (param_size + buffer_size) * 4
+        return total_bytes / (1024 ** 3)
+
+    def _get_safe_batch_size(self, model: nn.Module, requested_batch_size: int) -> int:
+        """Calculate safe batch size based on available GPU memory"""
+        if not torch.cuda.is_available():
+            return min(requested_batch_size, 64)  # CPU is slower, smaller batches
+
+        try:
+            gpu_memory_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+            model_memory_gb = self._estimate_model_memory(model)
+
+            # Leave ~2GB for activations and system overhead
+            available_for_batch = gpu_memory_gb - model_memory_gb - 2.0
+
+            if available_for_batch < 1.0:
+                logger.warning(f"Model uses ~{model_memory_gb:.1f}GB, GPU has {gpu_memory_gb:.1f}GB. Using small batch.")
+                return 16
+
+            # Scale batch size based on available memory
+            if model_memory_gb > 2.0:  # Large model
+                safe_batch = min(requested_batch_size, 32)
+            elif model_memory_gb > 1.0:  # Medium model
+                safe_batch = min(requested_batch_size, 64)
+            else:
+                safe_batch = requested_batch_size
+
+            return safe_batch
+        except Exception as e:
+            logger.warning(f"Could not estimate memory: {e}. Using batch_size=64")
+            return 64
+
     def _generic_train(self, model, epochs, batch_size, lr, weight_decay, save_every, early_stopping_patience):
         """Generic training for models without dedicated trainers"""
         model = model.to(self.device)
@@ -1106,32 +1202,68 @@ class UnifiedTrainingPipeline:
         scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=2)
         criterion = nn.MSELoss()
 
-        train_loader, val_loader = self.create_dataloaders(batch_size)
+        # Adjust batch size based on model size and available memory
+        safe_batch_size = self._get_safe_batch_size(model, batch_size)
+        if safe_batch_size != batch_size:
+            logger.info(f"Adjusted batch size from {batch_size} to {safe_batch_size} for memory safety")
+
+        train_loader, val_loader = self.create_dataloaders(safe_batch_size)
 
         logger.info(f"Training {self.model_name} with generic trainer")
+        logger.info(f"  Estimated model memory: {self._estimate_model_memory(model):.2f}GB")
 
         best_val_loss = float('inf')
         for epoch in range(epochs):
             model.train()
             epoch_loss = 0
+            batch_count = 0
             for batch in train_loader:
                 optimizer.zero_grad()
-                # Generic forward - assumes model takes user_ids, item_ids
+                # Generic forward - try multiple input patterns
                 try:
-                    user_ids = batch.get('user_ids', batch.get('user_id')).to(self.device)
-                    item_ids = batch.get('item_ids', batch.get('movie_ids', batch.get('show_ids'))).to(self.device)
-                    ratings = batch.get('ratings', batch.get('rating')).to(self.device)
+                    # Get user IDs (try multiple key names)
+                    user_ids = batch.get('user_ids', batch.get('user_id'))
+                    if user_ids is None:
+                        logger.warning(f"No user_ids found in batch keys: {batch.keys()}")
+                        continue
+                    user_ids = user_ids.to(self.device)
 
+                    # Get item IDs (try multiple key names for different content types)
+                    item_ids = batch.get('item_ids') or batch.get('movie_ids') or batch.get('show_ids')
+                    if item_ids is None:
+                        logger.warning(f"No item_ids found in batch keys: {batch.keys()}")
+                        continue
+                    item_ids = item_ids.to(self.device)
+
+                    # Get target ratings
+                    ratings = batch.get('ratings') or batch.get('rating') or batch.get('user_ratings')
+                    if ratings is None:
+                        logger.warning(f"No ratings found in batch keys: {batch.keys()}")
+                        continue
+                    ratings = ratings.to(self.device)
+
+                    # Try forward pass
                     outputs = model(user_ids, item_ids)
                     if isinstance(outputs, dict):
-                        pred = outputs.get('rating_pred', outputs.get('predictions', list(outputs.values())[0]))
+                        pred = outputs.get('rating_pred') or outputs.get('predictions') or outputs.get('scores')
+                        if pred is None:
+                            pred = list(outputs.values())[0]
                     else:
                         pred = outputs
 
                     loss = criterion(pred.squeeze(), ratings.float())
                     loss.backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                     optimizer.step()
                     epoch_loss += loss.item()
+                    batch_count += 1
+                except RuntimeError as e:
+                    if "out of memory" in str(e):
+                        logger.error(f"OOM error! Try reducing batch size. Current: {safe_batch_size}")
+                        torch.cuda.empty_cache()
+                        raise
+                    logger.warning(f"Batch failed: {e}")
+                    continue
                 except Exception as e:
                     logger.warning(f"Batch failed: {e}")
                     continue
