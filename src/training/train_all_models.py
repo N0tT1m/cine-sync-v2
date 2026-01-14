@@ -34,6 +34,9 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 import numpy as np
+import pandas as pd
+import ast
+from collections import defaultdict
 
 # Optional imports
 try:
@@ -487,59 +490,556 @@ ALL_MODELS = {
 
 
 # ============================================================================
+# REAL DATA LOADER
+# ============================================================================
+
+class RealDataLoader:
+    """
+    Comprehensive data loader that loads real datasets from available CSV files.
+    Supports MovieLens, TMDB, Anime, and IMDB data.
+
+    IMPORTANT: All IDs are re-mapped to fit within model embedding table sizes:
+    - user_id: 0 to MAX_USERS-1 (49999)
+    - item_id/movie_id/show_id: 0 to MAX_ITEMS-1 (99999)
+    - genre_id: 0 to MAX_GENRES-1 (29)
+    """
+
+    # Max values to match model embedding sizes
+    MAX_USERS = 50000
+    MAX_ITEMS = 100000
+    MAX_GENRES = 30
+
+    def __init__(self, data_dir: Path):
+        self.data_dir = Path(data_dir)
+        self.movie_data = None
+        self.tv_data = None
+        # ID mapping dicts for consistent re-mapping
+        self.user_id_map = {}
+        self.item_id_map = {}
+        self.genre_id_map = {}
+        self._load_all_data()
+
+    def _remap_user_id(self, original_id: int) -> int:
+        """Re-map user ID to be within MAX_USERS"""
+        if original_id not in self.user_id_map:
+            new_id = len(self.user_id_map) % self.MAX_USERS
+            self.user_id_map[original_id] = new_id
+        return self.user_id_map[original_id]
+
+    def _remap_item_id(self, original_id: int) -> int:
+        """Re-map item ID to be within MAX_ITEMS"""
+        if original_id not in self.item_id_map:
+            new_id = len(self.item_id_map) % self.MAX_ITEMS
+            self.item_id_map[original_id] = new_id
+        return self.item_id_map[original_id]
+
+    def _remap_genre_id(self, original_id: int) -> int:
+        """Re-map genre ID to be within MAX_GENRES"""
+        return original_id % self.MAX_GENRES
+
+    def _load_all_data(self):
+        """Load all available data sources"""
+        # Load movie data
+        self.movie_data = self._load_movie_data()
+        # Load TV data
+        self.tv_data = self._load_tv_data()
+
+        logger.info(f"Loaded {len(self.movie_data)} movie interactions")
+        logger.info(f"Loaded {len(self.tv_data)} TV interactions")
+        logger.info(f"Unique users: {len(self.user_id_map)}, Unique items: {len(self.item_id_map)}")
+
+    def _load_movie_data(self) -> List[Dict]:
+        """Load movie ratings from MovieLens and TMDB"""
+        # Note: We don't use caching here because ID remapping must be done per-instance
+        all_ratings = []
+
+        # Load MovieLens data
+        ml_ratings_path = self.data_dir / 'movies' / 'recommendation' / 'ml-latest-small' / 'ratings.csv'
+        ml_movies_path = self.data_dir / 'movies' / 'recommendation' / 'ml-latest-small' / 'movies.csv'
+
+        if ml_ratings_path.exists():
+            try:
+                ratings_df = pd.read_csv(ml_ratings_path)
+                movies_df = pd.read_csv(ml_movies_path) if ml_movies_path.exists() else None
+
+                # Create movie genre mapping
+                movie_genres = {}
+                genre_to_id = {}
+                if movies_df is not None:
+                    for _, row in movies_df.iterrows():
+                        genres = row['genres'].split('|') if pd.notna(row['genres']) else []
+                        for g in genres:
+                            if g not in genre_to_id:
+                                genre_to_id[g] = len(genre_to_id)
+                        movie_genres[row['movieId']] = [genre_to_id.get(g, 0) for g in genres[:3]]
+
+                for _, row in ratings_df.iterrows():
+                    original_movie_id = int(row['movieId'])
+                    original_user_id = int(row['userId'])
+                    genres = movie_genres.get(original_movie_id, [0])
+
+                    # Re-map IDs to fit within embedding table sizes
+                    user_id = self._remap_user_id(('ml', original_user_id))
+                    item_id = self._remap_item_id(('ml', original_movie_id))
+                    genre_id = self._remap_genre_id(genres[0] if genres else 0)
+
+                    all_ratings.append({
+                        'user_id': user_id,
+                        'item_id': item_id,
+                        'movie_id': item_id,
+                        'rating': float(row['rating']),
+                        'timestamp': int(row['timestamp']),
+                        'genre_id': genre_id,
+                        'source': 'movielens'
+                    })
+                logger.info(f"Loaded {len(ratings_df)} MovieLens ratings")
+            except Exception as e:
+                logger.warning(f"Error loading MovieLens data: {e}")
+
+        # Load TMDB ratings
+        tmdb_ratings_path = self.data_dir / 'movies' / 'tmdb-movies' / 'ratings_small.csv'
+        if tmdb_ratings_path.exists():
+            try:
+                tmdb_df = pd.read_csv(tmdb_ratings_path)
+                for _, row in tmdb_df.iterrows():
+                    original_user_id = int(row['userId'])
+                    original_movie_id = int(row['movieId'])
+
+                    # Re-map IDs (use 'tmdb' prefix to distinguish from MovieLens)
+                    user_id = self._remap_user_id(('tmdb', original_user_id))
+                    item_id = self._remap_item_id(('tmdb', original_movie_id))
+
+                    all_ratings.append({
+                        'user_id': user_id,
+                        'item_id': item_id,
+                        'movie_id': item_id,
+                        'rating': float(row['rating']),
+                        'timestamp': int(row['timestamp']),
+                        'genre_id': 0,
+                        'source': 'tmdb'
+                    })
+                logger.info(f"Loaded {len(tmdb_df)} TMDB ratings")
+            except Exception as e:
+                logger.warning(f"Error loading TMDB data: {e}")
+
+        return all_ratings
+
+    def _load_tv_data(self) -> List[Dict]:
+        """Load TV data from Anime profiles and IMDB series"""
+        # Note: We don't use caching here because ID remapping must be done per-instance
+        all_interactions = []
+
+        # Load Anime data
+        anime_profiles_path = self.data_dir / 'tv' / 'anime' / 'profiles.csv'
+        anime_shows_path = self.data_dir / 'tv' / 'anime' / 'animes.csv'
+
+        if anime_profiles_path.exists():
+            try:
+                profiles_df = pd.read_csv(anime_profiles_path)
+
+                # Load show info for metadata
+                show_scores = {}
+                show_genres = {}
+                genre_to_id = {}
+                if anime_shows_path.exists():
+                    shows_df = pd.read_csv(anime_shows_path)
+                    for _, row in shows_df.iterrows():
+                        show_id = int(row['uid'])
+                        show_scores[show_id] = float(row['score']) if pd.notna(row['score']) else 5.0
+                        genres = str(row['genre']).split(', ') if pd.notna(row['genre']) else []
+                        for g in genres:
+                            if g not in genre_to_id:
+                                genre_to_id[g] = len(genre_to_id)
+                        show_genres[show_id] = [genre_to_id.get(g, 0) for g in genres[:3]]
+
+                anime_user_idx = 0
+                for _, row in profiles_df.iterrows():
+                    try:
+                        # Parse favorites list
+                        favorites_str = row['favorites_anime']
+                        if pd.isna(favorites_str):
+                            continue
+                        favorites = ast.literal_eval(favorites_str)
+
+                        for show_id_str in favorites:
+                            original_show_id = int(show_id_str)
+                            # Favorites imply high rating (4-5 stars)
+                            rating = show_scores.get(original_show_id, 4.5)
+                            genres = show_genres.get(original_show_id, [0])
+
+                            # Re-map IDs to fit within embedding table sizes
+                            user_id = self._remap_user_id(('anime', anime_user_idx))
+                            item_id = self._remap_item_id(('anime', original_show_id))
+                            genre_id = self._remap_genre_id(genres[0] if genres else 0)
+
+                            all_interactions.append({
+                                'user_id': user_id,
+                                'item_id': item_id,
+                                'show_id': item_id,
+                                'rating': min(5.0, max(1.0, rating)),
+                                'timestamp': 0,
+                                'genre_id': genre_id,
+                                'source': 'anime'
+                            })
+                        anime_user_idx += 1
+                    except (ValueError, SyntaxError):
+                        continue
+
+                logger.info(f"Loaded {len(all_interactions)} anime interactions from {anime_user_idx} users")
+            except Exception as e:
+                logger.warning(f"Error loading anime data: {e}")
+
+        # Load IMDB series data
+        imdb_dir = self.data_dir / 'tv' / 'imdb'
+        if imdb_dir.exists():
+            try:
+                imdb_show_idx = 0
+                imdb_user_idx = 0
+                # Load all genre CSV files
+                for csv_file in imdb_dir.glob('*.csv'):
+                    try:
+                        series_df = pd.read_csv(csv_file)
+                        if 'Rating' not in series_df.columns:
+                            continue
+
+                        # Extract genre from filename
+                        genre_name = csv_file.stem.replace('_series', '')
+                        genre_id = self._remap_genre_id(hash(genre_name) % 100)
+
+                        for idx, row in series_df.iterrows():
+                            if pd.notna(row.get('Rating')):
+                                # Create synthetic user-item interactions based on ratings
+                                rating = float(row['Rating'])
+                                num_synthetic_users = max(1, int(rating * 2))
+
+                                # Re-map show ID
+                                item_id = self._remap_item_id(('imdb', imdb_show_idx))
+
+                                for u in range(num_synthetic_users):
+                                    # Re-map user ID
+                                    user_id = self._remap_user_id(('imdb', imdb_user_idx))
+                                    imdb_user_idx += 1
+
+                                    all_interactions.append({
+                                        'user_id': user_id,
+                                        'item_id': item_id,
+                                        'show_id': item_id,
+                                        'rating': rating / 2.0,  # Convert 0-10 to 0-5 scale
+                                        'timestamp': 0,
+                                        'genre_id': genre_id,
+                                        'source': 'imdb'
+                                    })
+                                imdb_show_idx += 1
+                    except Exception as e:
+                        continue
+
+                logger.info(f"Total TV interactions after IMDB: {len(all_interactions)}")
+            except Exception as e:
+                logger.warning(f"Error loading IMDB data: {e}")
+
+        return all_interactions
+
+    def get_movie_data(self, split: str = 'train', split_ratio: float = 0.8) -> List[Dict]:
+        """Get movie data with train/val split"""
+        if not self.movie_data:
+            return []
+
+        split_idx = int(len(self.movie_data) * split_ratio)
+        if split == 'train':
+            return self.movie_data[:split_idx]
+        else:
+            return self.movie_data[split_idx:]
+
+    def get_tv_data(self, split: str = 'train', split_ratio: float = 0.8) -> List[Dict]:
+        """Get TV data with train/val split"""
+        if not self.tv_data:
+            return []
+
+        split_idx = int(len(self.tv_data) * split_ratio)
+        if split == 'train':
+            return self.tv_data[:split_idx]
+        else:
+            return self.tv_data[split_idx:]
+
+    def get_combined_data(self, split: str = 'train', split_ratio: float = 0.8) -> List[Dict]:
+        """Get combined movie + TV data"""
+        return self.get_movie_data(split, split_ratio) + self.get_tv_data(split, split_ratio)
+
+
+# Global data loader instance (lazy initialized)
+_global_data_loader: Optional[RealDataLoader] = None
+
+def get_data_loader(data_dir: Path) -> RealDataLoader:
+    """Get or create the global data loader"""
+    global _global_data_loader
+    if _global_data_loader is None:
+        _global_data_loader = RealDataLoader(data_dir)
+    return _global_data_loader
+
+
+# ============================================================================
 # DATASET CLASSES
 # ============================================================================
 
 class UnifiedDataset(Dataset):
-    """Unified dataset that handles both movie and TV data"""
+    """Unified dataset that handles both movie and TV data using REAL data"""
 
     def __init__(self, data_dir: str, content_type: str, model_name: str, split: str = 'train'):
         self.data_dir = Path(data_dir)
         self.content_type = content_type
         self.model_name = model_name
         self.split = split
+        self.schema = self._get_model_schema()
         self.data = self._load_data()
 
     def _load_data(self) -> List[Dict]:
-        """Load data based on content type"""
+        """Load REAL data based on content type and transform to model schema"""
+        # Get the real data loader
+        data_loader = get_data_loader(self.data_dir)
+
+        # Get raw data based on content type
         if self.content_type == 'movie':
-            data_path = self.data_dir / 'movies'
+            raw_data = data_loader.get_movie_data(self.split)
         elif self.content_type == 'tv':
-            data_path = self.data_dir / 'tv'
+            raw_data = data_loader.get_tv_data(self.split)
         else:
-            # Both - combine movie and TV data
-            movie_data = self._load_from_path(self.data_dir / 'movies')
-            tv_data = self._load_from_path(self.data_dir / 'tv')
-            return movie_data + tv_data
+            raw_data = data_loader.get_combined_data(self.split)
 
-        return self._load_from_path(data_path)
+        if not raw_data:
+            logger.warning(f"No real data found for {self.content_type}. Using synthetic data.")
+            return self._generate_synthetic_data()
 
-    def _load_from_path(self, data_path: Path) -> List[Dict]:
-        """Load data from specific path"""
-        data_file = data_path / f"{self.model_name}_{self.split}.json"
-        if data_file.exists():
-            with open(data_file, 'r') as f:
-                return json.load(f)
+        # Transform raw data to model-specific schema
+        return self._transform_to_schema(raw_data)
 
-        # Try generic data file
-        generic_file = data_path / f"ratings_{self.split}.json"
-        if generic_file.exists():
-            with open(generic_file, 'r') as f:
-                return json.load(f)
+    def _transform_to_schema(self, raw_data: List[Dict]) -> List[Dict]:
+        """Transform raw data to match model-specific schema"""
+        transformed = []
 
-        logger.warning(f"Data file not found: {data_file}. Using synthetic data.")
-        return self._generate_synthetic_data()
+        # Group data by user for sequence-based models
+        user_sequences = defaultdict(list)
+        for item in raw_data:
+            user_sequences[item['user_id']].append(item)
+
+        # Sort each user's interactions by timestamp
+        for user_id in user_sequences:
+            user_sequences[user_id].sort(key=lambda x: x.get('timestamp', 0))
+
+        for item in raw_data:
+            sample = {}
+            user_seq = user_sequences[item['user_id']]
+
+            # Find current item's position in the user's sequence
+            item_idx = next((i for i, s in enumerate(user_seq) if s['item_id'] == item['item_id']), -1)
+
+            for key, spec in self.schema.items():
+                if spec['type'] == 'int':
+                    # Map to appropriate field from raw data
+                    sample[key] = self._get_int_field(key, item, spec, user_seq, item_idx)
+                elif spec['type'] == 'float':
+                    sample[key] = self._get_float_field(key, item, spec)
+                elif spec['type'] == 'int_seq':
+                    sample[key] = self._get_int_seq_field(key, item, user_seq, spec)
+                elif spec['type'] == 'float_seq':
+                    sample[key] = self._get_float_seq_field(key, item, user_seq, spec)
+                elif spec['type'] == 'bool':
+                    sample[key] = self._get_bool_field(key, item, spec, user_seq, item_idx)
+
+            transformed.append(sample)
+
+        logger.info(f"Transformed {len(transformed)} samples for model {self.model_name}")
+        return transformed
+
+    def _get_int_field(self, key: str, item: Dict, spec: Dict,
+                        user_seq: List[Dict] = None, item_idx: int = -1) -> int:
+        """Get integer field from raw data"""
+        max_val = spec.get('max', 50000)
+
+        # Direct mappings
+        if key in ['user_ids', 'user_id']:
+            return min(item.get('user_id', 0) % max_val, max_val - 1)
+        if key in ['item_ids', 'item_id']:
+            return min(item.get('item_id', 0) % max_val, max_val - 1)
+        if key in ['movie_ids', 'movie_id']:
+            return min(item.get('movie_id', item.get('item_id', 0)) % max_val, max_val - 1)
+        if key in ['show_ids', 'show_id']:
+            return min(item.get('show_id', item.get('item_id', 0)) % max_val, max_val - 1)
+        if key in ['genre_ids', 'genre_id']:
+            return min(item.get('genre_id', 0) % max_val, max_val - 1)
+        if key == 'timestamp':
+            return item.get('timestamp', 0) % max_val
+
+        # NEXT ITEM PREDICTION: Use actual next item from user's sequence
+        # This creates a learnable pattern for the model!
+        if key in ['next_movie', 'target_movies', 'next_show']:
+            if user_seq and item_idx >= 0 and item_idx < len(user_seq) - 1:
+                # Get the actual next item in the sequence
+                next_item = user_seq[item_idx + 1]
+                return min(next_item.get('item_id', 0) % max_val, max_val - 1)
+            else:
+                # No next item (end of sequence) - use current item
+                return min(item.get('item_id', 0) % max_val, max_val - 1)
+
+        # CONTRASTIVE LEARNING: positive_ids should be similar items, negative_ids different
+        if key == 'positive_ids':
+            # Positive = another item from same user with high rating (similar taste)
+            if user_seq and len(user_seq) > 1:
+                high_rated = [s for s in user_seq if s.get('rating', 0) >= 4.0 and s['item_id'] != item['item_id']]
+                if high_rated:
+                    return min(high_rated[0].get('item_id', 0) % max_val, max_val - 1)
+            # Fallback: use next item or current
+            if user_seq and item_idx >= 0 and item_idx < len(user_seq) - 1:
+                return min(user_seq[item_idx + 1].get('item_id', 0) % max_val, max_val - 1)
+            return min(item.get('item_id', 0) % max_val, max_val - 1)
+
+        if key == 'negative_ids':
+            # Negative = item not in user's history (random different item)
+            seed_val = item.get('item_id', 0) + item.get('user_id', 0)
+            # Generate a different ID that's likely not in user's history
+            neg_id = (seed_val * 7919 + 1) % max_val  # Prime multiplier for better distribution
+            return neg_id
+
+        # Derived fields - use deterministic hash based on item properties
+        seed_val = item.get('item_id', 0) + item.get('user_id', 0)
+
+        # Model-specific derived fields
+        if key in ['director_ids', 'studio_ids', 'distributor_ids', 'country_ids',
+                   'region_ids', 'language_ids', 'platform_ids', 'actor_ids',
+                   'era_ids', 'decade_ids', 'structure_ids', 'source_type_ids']:
+            return (seed_val * 31) % max_val
+        if key in ['social_context', 'time_context', 'venue', 'mood_ids',
+                   'desired_outcome', 'occasion_ids', 'season_ids', 'hours',
+                   'days', 'months', 'stage_ids', 'network_status', 'habit_types']:
+            return (seed_val * 17) % max_val
+        if key in ['original_ids', 'remake_ids']:
+            return (seed_val * 23 + 1) % max_val
+        if key in ['preferred_order', 'version_types', 'budget_range',
+                   'engagement_types', 'session_types', 'structure_types',
+                   'release_patterns', 'season_types', 'platform_types']:
+            return (seed_val * 7) % max_val
+        if key in ['nominations', 'wins', 'season_positions', 'runtime_minutes']:
+            return (seed_val * 13) % max_val
+
+        # Default: derive from seed
+        return seed_val % max_val
+
+    def _get_float_field(self, key: str, item: Dict, spec: Dict) -> float:
+        """Get float field from raw data"""
+        min_val = spec.get('min', 0)
+        max_val = spec.get('max', 5)
+
+        if key == 'ratings':
+            return float(np.clip(item.get('rating', 3.0), min_val, max_val))
+        if key == 'rating':
+            return float(np.clip(item.get('rating', 3.0), min_val, max_val))
+
+        # Derived float fields - deterministic based on rating
+        rating = item.get('rating', 3.0)
+        base = (rating / 5.0)  # Normalize to 0-1
+
+        if key in ['critic_scores', 'metacritic_scores', 'prestige_score']:
+            return float(np.clip(base * (max_val - min_val) + min_val, min_val, max_val))
+        if key in ['energy_level', 'pacing', 'faithfulness', 'reception',
+                   'cliffhanger_scores', 'session_duration']:
+            return float(np.clip(base, min_val, max_val))
+
+        # Default: random within bounds but seeded by item
+        seed = (item.get('item_id', 0) + item.get('user_id', 0)) % 1000
+        return float(np.clip(min_val + (seed / 1000.0) * (max_val - min_val), min_val, max_val))
+
+    def _get_int_seq_field(self, key: str, item: Dict, user_seq: List[Dict], spec: Dict) -> np.ndarray:
+        """Get integer sequence field from raw data"""
+        seq_len = spec.get('seq_len', 10)
+        max_val = spec.get('max', 50000)
+
+        # Find current item's position in sequence
+        item_idx = next((i for i, s in enumerate(user_seq) if s['item_id'] == item['item_id']), len(user_seq))
+
+        # For item sequences, use user's HISTORY (items before current)
+        # This lets the model learn to predict based on past behavior
+        if key in ['item_ids', 'movie_ids', 'show_ids', 'filmography_ids']:
+            # Get items BEFORE the current one
+            history = user_seq[:item_idx] if item_idx > 0 else user_seq[:1]
+            seq = [min(s.get('item_id', 0) % max_val, max_val - 1) for s in history[-seq_len:]]
+            # Pad if needed
+            while len(seq) < seq_len:
+                seq.insert(0, 0)  # Pad with zeros at the beginning
+            return np.array(seq[-seq_len:], dtype=np.int64)
+
+        if key == 'timestamps':
+            history = user_seq[:item_idx] if item_idx > 0 else user_seq[:1]
+            seq = [s.get('timestamp', 0) % max_val for s in history[-seq_len:]]
+            while len(seq) < seq_len:
+                seq.insert(0, 0)
+            return np.array(seq[-seq_len:], dtype=np.int64)
+
+        # For franchise/universe sequences, get related items
+        if key in ['franchise_ids', 'universe_ids', 'entry_types', 'phases',
+                   'universe_positions', 'release_positions', 'connection_types']:
+            # Use genre as a proxy for "franchise" - items with same genre
+            genre_id = item.get('genre_id', 0)
+            same_genre = [s for s in user_seq[:item_idx] if s.get('genre_id', -1) == genre_id]
+            if same_genre:
+                seq = [min(s.get('item_id', 0) % max_val, max_val - 1) for s in same_genre[-seq_len:]]
+            else:
+                seq = [item.get('item_id', 0) % max_val]
+            while len(seq) < seq_len:
+                seq.insert(0, 0)
+            return np.array(seq[-seq_len:], dtype=np.int64)
+
+        # For other sequences, derive deterministically
+        seed = item.get('item_id', 0) + item.get('user_id', 0)
+        np.random.seed(seed % (2**31))
+        return np.random.randint(0, max_val, size=seq_len)
+
+    def _get_float_seq_field(self, key: str, item: Dict, user_seq: List[Dict], spec: Dict) -> np.ndarray:
+        """Get float sequence field from raw data"""
+        seq_len = spec.get('seq_len', 10)
+        min_val = spec.get('min', 0)
+        max_val = spec.get('max', 1)
+
+        # Rating-based sequences
+        if key in ['episode_features', 'progress_features', 'quality_features',
+                   'change_features', 'health_features', 'duration_features']:
+            rating = item.get('rating', 3.0)
+            base = rating / 5.0
+            return np.full(seq_len, base, dtype=np.float32)
+
+        # Derive from item properties
+        seed = item.get('item_id', 0) + item.get('user_id', 0)
+        np.random.seed(seed % (2**31))
+        return np.random.uniform(min_val, max_val, size=seq_len).astype(np.float32)
+
+    def _get_bool_field(self, key: str, item: Dict, spec: Dict,
+                         user_seq: List[Dict] = None, item_idx: int = -1) -> float:
+        """Get boolean field from raw data"""
+        # COMPLETION PREDICTION: If user has more items after this one, they "completed"
+        # This creates a learnable pattern!
+        if key in ['completed', 'completed_franchise', 'completed_universe']:
+            if user_seq and item_idx >= 0:
+                # User completed if they watched more items (continued engaging)
+                # Combined with rating: high rating AND continued watching = completed
+                rating = item.get('rating', 3.0)
+                has_more = item_idx < len(user_seq) - 1
+                return 1.0 if (rating >= 3.5 and has_more) else 0.0
+            else:
+                # Fallback: derive from rating
+                rating = item.get('rating', 3.0)
+                return 1.0 if rating >= 4.0 else 0.0
+
+        # Default: 50% based on hash
+        seed = item.get('item_id', 0) + item.get('user_id', 0)
+        return float(seed % 2)
 
     def _generate_synthetic_data(self, size: int = 10000) -> List[Dict]:
-        """Generate synthetic training data with model-specific fields"""
+        """Fallback: Generate synthetic training data with model-specific fields"""
         data = []
 
-        # Model-specific data schemas
-        schema = self._get_model_schema()
-
-        for _ in range(size):
+        for i in range(size):
             sample = {}
-            for key, spec in schema.items():
+            # Use deterministic seeding for reproducible data
+            np.random.seed(i)
+            for key, spec in self.schema.items():
                 if spec['type'] == 'int':
                     sample[key] = np.random.randint(0, spec.get('max', 50000))
                 elif spec['type'] == 'float':
