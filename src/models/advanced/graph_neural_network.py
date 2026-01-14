@@ -23,15 +23,16 @@ except ImportError:
 
 class LightGCNConv(MessagePassing):
     """Light Graph Convolutional Network layer
-    
+
     Simplified graph convolution that removes feature transformation and
     non-linear activation to focus purely on neighborhood aggregation.
     More effective for collaborative filtering than standard GCN.
     """
-    
-    def __init__(self, **kwargs):
+
+    def __init__(self):
         """Initialize LightGCN convolution with additive aggregation"""
-        super(LightGCNConv, self).__init__(aggr='add', **kwargs)  # Sum aggregation
+        # Note: In newer PyTorch Geometric versions, aggr is specified directly
+        super(LightGCNConv, self).__init__(aggr='add')
     
     def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
         """

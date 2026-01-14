@@ -50,8 +50,9 @@ class StudioEncoder(nn.Module):
             nn.Linear(config.embedding_dim // 4, config.embedding_dim // 4)
         )
 
-        # Studio type embedding (major, mini-major, indie, streaming)
-        self.studio_type_embedding = nn.Embedding(6, config.embedding_dim // 4)
+        # Studio type embedding (major, mini-major, indie, streaming, arthouse, international, etc.)
+        # 11 types to support indices 0-10
+        self.studio_type_embedding = nn.Embedding(11, config.embedding_dim // 4)
 
         # Combine features
         # Input: studio(256) + dist(128) + prod(128) + char(64) + type(64) = 640
@@ -97,9 +98,9 @@ class StudioStyleAnalyzer(nn.Module):
             nn.Linear(config.embedding_dim // 4, config.embedding_dim // 4)
         )
 
-        # Franchise tendency
+        # Franchise tendency (expanded features)
         self.franchise_encoder = nn.Sequential(
-            nn.Linear(3, config.embedding_dim // 4),  # franchise_ratio, avg_franchise_length, reboot_rate
+            nn.Linear(8, config.embedding_dim // 4),  # franchise features: ratio, avg_length, reboot_rate, sequel_rate, spinoff_rate, crossover_rate, universe_rate, standalone_rate
             nn.GELU(),
             nn.Linear(config.embedding_dim // 4, config.embedding_dim // 4)
         )
