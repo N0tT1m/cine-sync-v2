@@ -790,11 +790,14 @@ def train_category(
         logger.info(f"{'='*60}\n")
 
         try:
+            # Only pass init-compatible kwargs to the constructor
+            init_kwargs = {k: v for k, v in training_kwargs.items()
+                          if k in ('device', 'use_wandb', 'wandb_project')}
             pipeline = UnifiedTrainingPipeline(
                 model_name=model_name,
                 data_dir=data_dir,
                 output_dir=output_dir,
-                **training_kwargs
+                **init_kwargs
             )
             result = pipeline.train(**training_kwargs)
             results[model_name] = {'status': 'success', 'result': result}
