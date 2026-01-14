@@ -501,3 +501,6 @@ if __name__ == "__main__":
 
     print(f"Contrastive loss: {outputs['contrastive_loss'].item()}")
     print(f"Embedding shape: {outputs['anchor_embedding'].shape}")
+
+# Alias for backward compatibility
+UnifiedContrastiveLearning = ContrastiveLearningModule

@@ -577,3 +577,5 @@ def get_meta_learning_config():
         'epochs': 50,
         'patience': 20,
     }
+# Alias for backward compatibility
+MetaLearningTVModel = MetaLearningTVAdapter

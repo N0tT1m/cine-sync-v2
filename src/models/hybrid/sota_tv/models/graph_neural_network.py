@@ -506,3 +506,7 @@ def get_gnn_config():
         'gradient_clip': 1.0,
         'use_mixed_precision': True,  # Important for 4090
     }
+
+
+# Alias for backward compatibility
+TVGraphNeuralNetwork = TVGraphRecommender

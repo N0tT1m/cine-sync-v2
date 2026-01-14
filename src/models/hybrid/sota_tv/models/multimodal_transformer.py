@@ -423,3 +423,5 @@ def get_model_config():
         'warmup_steps': 1000,
         'max_grad_norm': 1.0,
     }
+# Alias for backward compatibility
+MultimodalTVTransformer = MultimodalTransformerTV
