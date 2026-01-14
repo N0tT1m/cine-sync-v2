@@ -99,14 +99,14 @@ class PrestigeFeatureExtractor(nn.Module):
             nn.Linear(config.embedding_dim // 4, config.embedding_dim // 4)
         )
 
-        # Studio prestige embedding
-        self.studio_prestige = nn.Embedding(500, config.embedding_dim // 4)
+        # Studio prestige embedding (training data has max 1000)
+        self.studio_prestige = nn.Embedding(1001, config.embedding_dim // 4)
 
-        # Distributor embedding (A24, Focus Features, etc.)
-        self.distributor_embedding = nn.Embedding(200, config.embedding_dim // 4)
+        # Distributor embedding (A24, Focus Features, etc.) (training data has max 500)
+        self.distributor_embedding = nn.Embedding(501, config.embedding_dim // 4)
 
-        # Budget range embedding (indie vs blockbuster)
-        self.budget_embedding = nn.Embedding(10, config.embedding_dim // 4)
+        # Budget range embedding (indie vs blockbuster) (training data has max 10)
+        self.budget_embedding = nn.Embedding(11, config.embedding_dim // 4)
 
         # Combine features
         # Input: critic(128) + timing(64) + studio(64) + dist(64) + budget(64) = 384
