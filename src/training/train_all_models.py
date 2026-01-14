@@ -1587,7 +1587,8 @@ class UnifiedTrainingPipeline:
             'epochs', 'batch_size', 'lr', 'weight_decay', 'save_every',
             'early_stopping_patience', 'device', 'use_wandb', 'wandb_project',
             'num_workers', 'gradient_accumulation_steps',
-            'publish_to_registry', 'registry_path'  # Model registry params
+            'publish_to_registry', 'registry_path',  # Model registry params
+            'skip_existing'  # Training flow control
         }
         model_config = {k: v for k, v in config_overrides.items() if k not in training_params}
 
