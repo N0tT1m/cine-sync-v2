@@ -52,7 +52,7 @@ class VariationalEncoder(nn.Module):
         self.logvar_layer = nn.Linear(prev_dim, latent_dim)  # Log-variance of q(z|x)
     
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        \"\"\"Encode input to latent distribution parameters\"\"\"
+        """Encode input to latent distribution parameters"""
         h = self.encoder(x)
         mu = self.mu_layer(h)
         logvar = self.logvar_layer(h)
@@ -60,7 +60,7 @@ class VariationalEncoder(nn.Module):
 
 
 class VAETrainer:
-    \"\"\"Trainer for VAE recommender with comprehensive checkpointing\"\"\"
+    """Trainer for VAE recommender with comprehensive checkpointing"""
     
     def __init__(self, model, device='cuda', learning_rate=0.001, weight_decay=1e-5, beta=1.0):
         self.model = model.to(device)
@@ -77,7 +77,7 @@ class VAETrainer:
         self.training_history = []
     
     def save_checkpoint(self, filepath: str, epoch: int, metrics: Dict[str, float]):
-        \"\"\"Save comprehensive checkpoint with all training state\"\"\"
+        """Save comprehensive checkpoint with all training state"""
         checkpoint = {
             'epoch': epoch,
             'model_state_dict': self.model.state_dict(),
@@ -95,10 +95,10 @@ class VAETrainer:
         }
         
         torch.save(checkpoint, filepath)
-        print(f\"Saved VAE checkpoint to {filepath}\")
+        print(f"Saved VAE checkpoint to {filepath}")
     
     def load_checkpoint(self, filepath: str) -> Dict:
-        \"\"\"Load checkpoint and restore training state\"\"\"
+        """Load checkpoint and restore training state"""
         checkpoint = torch.load(filepath, map_location=self.device)
         
         self.model.load_state_dict(checkpoint['model_state_dict'])
@@ -107,13 +107,50 @@ class VAETrainer:
         self.training_history = checkpoint.get('training_history', [])
         self.beta = checkpoint.get('beta', 1.0)
         
-        print(f\"Loaded VAE checkpoint from {filepath}\")
+        print(f"Loaded VAE checkpoint from {filepath}")
         return checkpoint
-        self.mu_layer = nn.Linear(prev_dim, latent_dim)      # Mean of q(z|x)
-        self.logvar_layer = nn.Linear(prev_dim, latent_dim)  # Log-variance of q(z|x)
-        
+
+
+class VAERecommender(nn.Module):
+    """Variational Autoencoder for Collaborative Filtering (MultVAE)"""
+
+    def __init__(self, num_items, hidden_dims=[600, 200], latent_dim=50, dropout=0.5):
+        super(VAERecommender, self).__init__()
+        self.input_dim = num_items
+        self.latent_dim = latent_dim
+        self.hidden_dims = hidden_dims
+
+        # Encoder
+        encoder_layers = []
+        prev_dim = num_items
+        for hidden_dim in hidden_dims:
+            encoder_layers.extend([
+                nn.Linear(prev_dim, hidden_dim),
+                nn.Tanh(),
+                nn.Dropout(dropout)
+            ])
+            prev_dim = hidden_dim
+        self.encoder = nn.Sequential(*encoder_layers)
+
+        # Latent space
+        self.mu_layer = nn.Linear(prev_dim, latent_dim)
+        self.logvar_layer = nn.Linear(prev_dim, latent_dim)
+
+        # Decoder
+        decoder_layers = []
+        prev_dim = latent_dim
+        for hidden_dim in reversed(hidden_dims):
+            decoder_layers.extend([
+                nn.Linear(prev_dim, hidden_dim),
+                nn.Tanh(),
+                nn.Dropout(dropout)
+            ])
+            prev_dim = hidden_dim
+        decoder_layers.append(nn.Linear(prev_dim, num_items))
+        self.decoder = nn.Sequential(*decoder_layers)
+
         self._init_weights()
-    
+
     def _init_weights(self):
         for module in self.modules():
             if isinstance(module, nn.Linear):

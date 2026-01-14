@@ -5,9 +5,12 @@ Web-based dashboard for managing AI models, training preferences, and data filte
 
 from flask import Flask, render_template, request, jsonify, redirect, url_for, flash
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
+from werkzeug.security import check_password_hash, generate_password_hash
+from functools import wraps
 import os
 import json
 import logging
+import secrets
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 import asyncio
@@ -16,10 +19,37 @@ import pandas as pd
 import plotly.graph_objs as go
 import plotly.utils
 
-app = Flask(__name__, 
+# Import validation
+try:
+    from validation import (
+        ValidationError,
+        validate_model_name,
+        validate_user_id,
+        validate_training_preferences,
+        validate_model_upload,
+        sanitize_string
+    )
+    VALIDATION_AVAILABLE = True
+except ImportError:
+    VALIDATION_AVAILABLE = False
+    logging.warning("Validation module not available")
+
+app = Flask(__name__,
            template_folder='templates',
            static_folder='static')
-app.secret_key = os.environ.get('ADMIN_SECRET_KEY', 'dev-key-change-in-production')
+
+# Security: Use environment variable or generate secure random key
+# NEVER use a default key in production
+_secret_key = os.environ.get('ADMIN_SECRET_KEY')
+if not _secret_key:
+    logging.warning("ADMIN_SECRET_KEY not set! Using random key (sessions won't persist across restarts)")
+    _secret_key = secrets.token_hex(32)
+app.secret_key = _secret_key
+
+# Rate limiting storage
+_login_attempts = {}
+MAX_LOGIN_ATTEMPTS = 5
+LOGIN_LOCKOUT_MINUTES = 15
 
 # Setup login manager
 login_manager = LoginManager()
@@ -39,23 +69,76 @@ def load_user(user_id):
         return AdminUser(user_id)
     return None
 
+def check_rate_limit(ip_address: str) -> bool:
+    """Check if IP is rate limited for login attempts"""
+    if ip_address in _login_attempts:
+        attempts, lockout_time = _login_attempts[ip_address]
+        if lockout_time and datetime.now() < lockout_time:
+            return False  # Still locked out
+        if lockout_time and datetime.now() >= lockout_time:
+            # Lockout expired, reset
+            _login_attempts[ip_address] = (0, None)
+    return True
+
+def record_failed_login(ip_address: str):
+    """Record a failed login attempt"""
+    attempts, _ = _login_attempts.get(ip_address, (0, None))
+    attempts += 1
+    if attempts >= MAX_LOGIN_ATTEMPTS:
+        lockout_time = datetime.now() + timedelta(minutes=LOGIN_LOCKOUT_MINUTES)
+        _login_attempts[ip_address] = (attempts, lockout_time)
+        logging.warning(f"IP {ip_address} locked out after {attempts} failed login attempts")
+    else:
+        _login_attempts[ip_address] = (attempts, None)
+
+def clear_login_attempts(ip_address: str):
+    """Clear login attempts after successful login"""
+    if ip_address in _login_attempts:
+        del _login_attempts[ip_address]
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        username = request.form['username']
-        password = request.form['password']
-        
-        # Simple authentication - in production use proper auth
-        admin_password = os.environ.get('ADMIN_PASSWORD', 'admin123')
-        admin_users = os.environ.get('ADMIN_USERS', 'admin').split(',')
-        
-        if username in admin_users and password == admin_password:
+        ip_address = request.remote_addr
+
+        # Check rate limiting
+        if not check_rate_limit(ip_address):
+            flash('Too many failed attempts. Please try again later.')
+            return render_template('login.html')
+
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '')
+
+        # Input validation
+        if not username or not password:
+            flash('Username and password are required')
+            return render_template('login.html')
+
+        # Get admin credentials from environment
+        admin_users = os.environ.get('ADMIN_USERS', '').split(',')
+        admin_users = [u.strip() for u in admin_users if u.strip()]
+
+        # IMPORTANT: Password hash must be set via ADMIN_PASSWORD_HASH env var
+        # Generate hash with: python -c "from werkzeug.security import generate_password_hash; print(generate_password_hash('your_password'))"
+        admin_password_hash = os.environ.get('ADMIN_PASSWORD_HASH')
+
+        if not admin_users or not admin_password_hash:
+            logging.error("ADMIN_USERS or ADMIN_PASSWORD_HASH not configured!")
+            flash('Admin authentication not properly configured')
+            return render_template('login.html')
+
+        # Verify credentials with secure password comparison
+        if username in admin_users and check_password_hash(admin_password_hash, password):
             user = AdminUser(username)
             login_user(user)
+            clear_login_attempts(ip_address)
+            logging.info(f"Admin user '{username}' logged in from {ip_address}")
             return redirect(url_for('dashboard'))
         else:
+            record_failed_login(ip_address)
+            logging.warning(f"Failed login attempt for user '{username}' from {ip_address}")
             flash('Invalid credentials')
-    
+
     return render_template('login.html')
 
 @app.route('/logout')
@@ -99,7 +182,13 @@ def models_page():
 @login_required
 def toggle_model(model_name):
     """Enable/disable a model"""
-    
+    # Validate model name
+    if VALIDATION_AVAILABLE:
+        try:
+            model_name = validate_model_name(model_name)
+        except ValidationError as e:
+            return jsonify({'success': False, 'error': e.message}), 400
+
     if model_name in model_manager.model_configs:
         current_status = model_manager.model_configs[model_name].enabled
         model_manager.model_configs[model_name].enabled = not current_status
@@ -162,53 +251,85 @@ def training_page():
 @login_required
 def update_training_preferences():
     """Update training preferences"""
-    
+
     try:
         data = request.get_json()
-        
-        # Validate preferences
-        valid_preferences = {
-            'auto_retrain',
-            'min_feedback_threshold',
-            'excluded_genres',
-            'excluded_users',
-            'quality_filters'
-        }
-        
-        filtered_data = {k: v for k, v in data.items() if k in valid_preferences}
-        
+
+        if data is None:
+            return jsonify({'success': False, 'error': 'Invalid JSON data'}), 400
+
+        # Validate and filter preferences
+        if VALIDATION_AVAILABLE:
+            try:
+                filtered_data = validate_training_preferences(data)
+            except ValidationError as e:
+                return jsonify({
+                    'success': False,
+                    'error': e.message,
+                    'field': e.field
+                }), 400
+        else:
+            # Fallback validation
+            valid_preferences = {
+                'auto_retrain',
+                'min_feedback_threshold',
+                'excluded_genres',
+                'excluded_users',
+                'quality_filters'
+            }
+            filtered_data = {k: v for k, v in data.items() if k in valid_preferences}
+
         # Update preferences
         model_manager.update_training_preferences(filtered_data)
-        
+
         return jsonify({
             'success': True,
             'message': 'Training preferences updated successfully'
         })
-        
+
     except Exception as e:
+        logging.error(f"Error updating training preferences: {e}")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'Internal server error'
         }), 500
 
 @app.route('/api/training/exclude_user', methods=['POST'])
 @login_required
 def exclude_user():
     """Exclude a user from training data"""
-    
-    user_id = request.json.get('user_id')
-    
-    if user_id:
-        excluded_users = set(model_manager.training_preferences.get('excluded_users', []))
-        excluded_users.add(int(user_id))
-        
-        model_manager.update_training_preferences({
-            'excluded_users': list(excluded_users)
-        })
-        
-        return jsonify({'success': True})
-    
-    return jsonify({'success': False, 'error': 'User ID required'}), 400
+
+    data = request.get_json()
+    if data is None:
+        return jsonify({'success': False, 'error': 'Invalid JSON data'}), 400
+
+    user_id = data.get('user_id')
+
+    if user_id is None:
+        return jsonify({'success': False, 'error': 'User ID required'}), 400
+
+    # Validate user ID
+    if VALIDATION_AVAILABLE:
+        try:
+            user_id = validate_user_id(user_id)
+        except ValidationError as e:
+            return jsonify({'success': False, 'error': e.message}), 400
+    else:
+        try:
+            user_id = int(user_id)
+            if user_id < 0:
+                raise ValueError()
+        except (ValueError, TypeError):
+            return jsonify({'success': False, 'error': 'Invalid user ID'}), 400
+
+    excluded_users = set(model_manager.training_preferences.get('excluded_users', []))
+    excluded_users.add(user_id)
+
+    model_manager.update_training_preferences({
+        'excluded_users': list(excluded_users)
+    })
+
+    return jsonify({'success': True})
 
 @app.route('/api/training/include_user', methods=['POST'])
 @login_required

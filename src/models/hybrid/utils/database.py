@@ -5,14 +5,21 @@ Database operations for the content recommendation system.
 Supports both movies and TV shows with content_type parameter.
 """
 
-import psycopg2
-import psycopg2.extras
 import pandas as pd
 import logging
 from datetime import datetime
 from typing import Optional, Dict, Any, List, Union
 from contextlib import contextmanager
 from enum import Enum
+
+# Optional psycopg2 import - allows models to load without database
+try:
+    import psycopg2
+    import psycopg2.extras
+    PSYCOPG2_AVAILABLE = True
+except ImportError:
+    psycopg2 = None
+    PSYCOPG2_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +53,11 @@ class DatabaseManager:
         Args:
             config: DatabaseConfig object with connection parameters
         """
+        if not PSYCOPG2_AVAILABLE:
+            raise ImportError(
+                "psycopg2 is required for database operations. "
+                "Install it with: pip install psycopg2-binary"
+            )
         self.config = config
         self._connection = None
 
@@ -60,6 +72,9 @@ class DatabaseManager:
         Yields:
             Database connection
         """
+        if not PSYCOPG2_AVAILABLE:
+            raise ImportError("psycopg2 is not available")
+
         conn = None
         try:
             conn = psycopg2.connect(

@@ -592,15 +592,54 @@ class UnifiedTrainingPipeline:
         """Create model instance"""
         model_class, _, config_class = self._load_model_class()
 
+        # Filter out training-specific parameters that shouldn't be passed to config
+        training_params = {
+            'epochs', 'batch_size', 'lr', 'weight_decay', 'save_every',
+            'early_stopping_patience', 'device', 'use_wandb', 'wandb_project',
+            'num_workers', 'gradient_accumulation_steps'
+        }
+        model_config = {k: v for k, v in config_overrides.items() if k not in training_params}
+
         if config_class is not None:
-            config = config_class(**config_overrides) if config_overrides else config_class()
+            config = config_class(**model_config) if model_config else config_class()
             model = model_class(config)
         else:
-            model = model_class()
+            # Provide default arguments for models without config classes
+            default_args = self._get_default_model_args()
+            model_config.update({k: v for k, v in default_args.items() if k not in model_config})
+            try:
+                model = model_class(**model_config)
+            except TypeError:
+                # Try without any args as fallback
+                try:
+                    model = model_class()
+                except TypeError as e:
+                    logger.error(f"Could not instantiate {self.model_name}: {e}")
+                    raise
 
         param_count = sum(p.numel() for p in model.parameters())
         logger.info(f"Created {self.model_name} with {param_count:,} parameters")
         return model
+
+    def _get_default_model_args(self) -> Dict[str, Any]:
+        """Get default arguments for models without config classes"""
+        # Default values for common model parameters
+        defaults = {
+            'num_users': 50000,
+            'num_items': 100000,
+            'num_movies': 100000,
+            'num_shows': 50000,
+            'user_features_dim': 128,
+            'item_features_dim': 256,
+            'embedding_dim': 128,
+            'hidden_dim': 256,
+            'd_model': 256,
+            'num_heads': 8,
+            'num_layers': 4,
+            'dropout': 0.1,
+            'vocab_sizes': {'shows': 50000, 'genres': 50, 'networks': 100},
+        }
+        return defaults
 
     def create_dataloaders(self, batch_size: int = 256, num_workers: int = 4) -> tuple:
         """Create train and validation dataloaders"""
