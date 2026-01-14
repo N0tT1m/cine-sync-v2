@@ -588,12 +588,12 @@ class UnifiedDataset(Dataset):
             'movie_cinematic_universe': {
                 'user_ids': {'type': 'int', 'max': 50000},
                 'movie_ids': {'type': 'int_seq', 'max': 100000, 'seq_len': 20},
-                'universe_ids': {'type': 'int_seq', 'max': 1000, 'seq_len': 20},
-                'universe_positions': {'type': 'int_seq', 'max': 50, 'seq_len': 20},
-                'release_positions': {'type': 'int_seq', 'max': 50, 'seq_len': 20},
-                'phases': {'type': 'int_seq', 'max': 10, 'seq_len': 20},
+                'universe_ids': {'type': 'int_seq', 'max': 500, 'seq_len': 20},  # Must match num_universes=500
+                'universe_positions': {'type': 'int_seq', 'max': 100, 'seq_len': 20},  # Must match max_timeline_length=100
+                'release_positions': {'type': 'int_seq', 'max': 100, 'seq_len': 20},  # Must match max_timeline_length=100
+                'phases': {'type': 'int_seq', 'max': 20, 'seq_len': 20},  # Must match phase_embedding size=20
                 'adjacency': {'type': 'float_seq', 'seq_len': 20},  # Simplified adjacency
-                'connection_types': {'type': 'int_seq', 'max': 10, 'seq_len': 20},
+                'connection_types': {'type': 'int_seq', 'max': 10, 'seq_len': 20},  # Must match connection_types size=10
                 'ratings': {'type': 'float', 'min': 1, 'max': 5},
                 'next_movie': {'type': 'int', 'max': 100000},
                 'preferred_order': {'type': 'int', 'max': 3},
@@ -602,32 +602,32 @@ class UnifiedDataset(Dataset):
             'movie_critic_audience': {
                 'user_ids': {'type': 'int', 'max': 50000},
                 'movie_ids': {'type': 'int', 'max': 100000},
-                'metacritic_scores': {'type': 'float', 'min': 0, 'max': 100},
-                'rt_scores': {'type': 'float', 'min': 0, 'max': 100},
-                'imdb_scores': {'type': 'float', 'min': 0, 'max': 10},
-                'letterboxd_scores': {'type': 'float', 'min': 0, 'max': 5},
-                'user_ratings': {'type': 'float', 'min': 1, 'max': 5},
+                'metacritic_scores': {'type': 'float_seq', 'seq_len': 2},  # critic, user scores
+                'rt_scores': {'type': 'float_seq', 'seq_len': 4},  # critic %, audience %, avg_critic, avg_audience
+                'imdb_scores': {'type': 'float_seq', 'seq_len': 2},  # score, vote_count
+                'letterboxd_scores': {'type': 'float_seq', 'seq_len': 2},  # avg rating, ratings count
+                'ratings': {'type': 'float', 'min': 1, 'max': 5},  # Target rating
             },
             'movie_actor_collaboration': {
                 'user_ids': {'type': 'int', 'max': 50000},
                 'movie_ids': {'type': 'int', 'max': 100000},
                 'actor_ids': {'type': 'int_seq', 'max': 100000, 'seq_len': 5},
-                'role_types': {'type': 'int_seq', 'max': 10, 'seq_len': 5},
-                'career_features': {'type': 'float_seq', 'seq_len': 5},
-                'genre_distributions': {'type': 'float_seq', 'seq_len': 30},
+                'role_types': {'type': 'int_seq', 'max': 5, 'seq_len': 5},  # Must match role_type_embedding size=5
+                'career_features': {'type': 'float_seq', 'seq_len': 4},  # Must match career_encoder input=4
+                'genre_distributions': {'type': 'float_seq', 'seq_len': 30},  # Must match genre_specialty input=30
                 'ratings': {'type': 'float', 'min': 1, 'max': 5},
             },
             'movie_viewing_context': {
                 'user_ids': {'type': 'int', 'max': 50000},
                 'movie_ids': {'type': 'int', 'max': 100000},
-                'social_context': {'type': 'int', 'max': 10},
+                'social_context': {'type': 'int', 'max': 30},  # Must match num_contexts=30
                 'time_context': {'type': 'int', 'max': 24},
                 'venue': {'type': 'int', 'max': 10},
                 'duration_features': {'type': 'float_seq', 'seq_len': 2},
-                'mood_ids': {'type': 'int', 'max': 20},
+                'mood_ids': {'type': 'int', 'max': 20},  # Must match num_moods=20
                 'energy_level': {'type': 'float', 'min': 0, 'max': 1},
                 'desired_outcome': {'type': 'int', 'max': 10},
-                'occasion_ids': {'type': 'int', 'max': 20},
+                'occasion_ids': {'type': 'int', 'max': 25},  # Must match num_occasions=25
                 'season_ids': {'type': 'int', 'max': 4},
                 'ratings': {'type': 'float', 'min': 1, 'max': 5},
             },
@@ -654,11 +654,11 @@ class UnifiedDataset(Dataset):
             'movie_era_style': {
                 'user_ids': {'type': 'int', 'max': 50000},
                 'movie_ids': {'type': 'int', 'max': 100000},
-                'era_ids': {'type': 'int', 'max': 15},
-                'decade_ids': {'type': 'int', 'max': 15},
+                'era_ids': {'type': 'int', 'max': 15},  # Must match num_eras=15
+                'decade_ids': {'type': 'int', 'max': 13},  # Must match num_decades=13
                 'years': {'type': 'int', 'max': 2030},
-                'visual_styles': {'type': 'int', 'max': 50},
-                'audio_styles': {'type': 'int', 'max': 50},
+                'visual_styles': {'type': 'int', 'max': 30},  # Must match num_visual_styles=30
+                'audio_styles': {'type': 'int', 'max': 20},  # Must match num_audio_styles=20
                 'ratings': {'type': 'float', 'min': 1, 'max': 5},
             },
             'movie_remake_connection': {
@@ -673,9 +673,9 @@ class UnifiedDataset(Dataset):
             'movie_studio_fingerprint': {
                 'user_ids': {'type': 'int', 'max': 50000},
                 'movie_ids': {'type': 'int', 'max': 100000},
-                'studio_ids': {'type': 'int', 'max': 1000},
-                'distributor_ids': {'type': 'int', 'max': 500},
-                'prod_company_ids': {'type': 'int', 'max': 2000},
+                'studio_ids': {'type': 'int', 'max': 1000},  # Must match num_studios=1000
+                'distributor_ids': {'type': 'int', 'max': 500},  # Must match num_distributors=500
+                'prod_company_ids': {'type': 'int', 'max': 5000},  # Must match num_production_companies=5000
                 'characteristics': {'type': 'float_seq', 'seq_len': 16},
                 'studio_types': {'type': 'int', 'max': 10},
                 'genre_dist': {'type': 'float_seq', 'seq_len': 30},
@@ -686,13 +686,13 @@ class UnifiedDataset(Dataset):
             'movie_adaptation_source': {
                 'user_ids': {'type': 'int', 'max': 50000},
                 'movie_ids': {'type': 'int', 'max': 100000},
-                'source_type_ids': {'type': 'int', 'max': 10},
-                'source_ids': {'type': 'int', 'max': 50000},
-                'characteristics': {'type': 'float_seq', 'seq_len': 16},
-                'genre_features': {'type': 'float_seq', 'seq_len': 30},
+                'source_type_ids': {'type': 'int', 'max': 15},  # Must match num_source_types=15
+                'source_ids': {'type': 'int', 'max': 50000},  # Must match num_sources=50000
+                'characteristics': {'type': 'float_seq', 'seq_len': 8},  # Must match characteristics_encoder input=8
+                'genre_features': {'type': 'float_seq', 'seq_len': 60},  # Must match genre_mapping input=60
                 'faithfulness': {'type': 'float', 'min': 0, 'max': 1},
                 'reception': {'type': 'float', 'min': 0, 'max': 1},
-                'adaptation_types': {'type': 'int', 'max': 10},
+                'adaptation_types': {'type': 'int', 'max': 15},  # Same as source_type_ids
                 'ratings': {'type': 'float', 'min': 1, 'max': 5},
             },
             'movie_international': {
@@ -711,10 +711,10 @@ class UnifiedDataset(Dataset):
             'movie_narrative_complexity': {
                 'user_ids': {'type': 'int', 'max': 50000},
                 'movie_ids': {'type': 'int', 'max': 100000},
-                'structure_ids': {'type': 'int', 'max': 20},
-                'complexity_features': {'type': 'float_seq', 'seq_len': 8},
-                'theme_vector': {'type': 'float_seq', 'seq_len': 50},
-                'dialogue_features': {'type': 'float_seq', 'seq_len': 8},
+                'structure_ids': {'type': 'int', 'max': 20},  # Must match num_structures=20
+                'complexity_features': {'type': 'float_seq', 'seq_len': 8},  # Must match complexity_encoder input=8
+                'theme_vector': {'type': 'float_seq', 'seq_len': 100},  # Must match num_themes=100
+                'dialogue_features': {'type': 'float_seq', 'seq_len': 4},  # Must match dialogue_encoder input=4
                 'ratings': {'type': 'float', 'min': 1, 'max': 5},
             },
         }
@@ -1019,6 +1019,16 @@ class UnifiedTrainingPipeline:
         else:
             # Provide default arguments for models without config classes
             default_args = self._get_default_model_args()
+
+            # Check if model requires pre-built sub-models (marked as skip)
+            if default_args.get('_skip', False):
+                raise ValueError(
+                    f"Model {self.model_name} requires pre-built sub-models and cannot be "
+                    f"instantiated directly. Please use the ensemble system to combine models."
+                )
+
+            # Remove internal flags before passing to constructor
+            default_args = {k: v for k, v in default_args.items() if not k.startswith('_')}
             model_config.update({k: v for k, v in default_args.items() if k not in model_config})
             try:
                 model = model_class(**model_config)
@@ -1036,23 +1046,146 @@ class UnifiedTrainingPipeline:
 
     def _get_default_model_args(self) -> Dict[str, Any]:
         """Get default arguments for models without config classes"""
-        # Default values for common model parameters
-        defaults = {
+        # Model-specific argument mappings based on each model's __init__ signature
+        model_specific_args = {
+            # NCF models require num_users, num_items as positional args
+            'ncf': {
+                'num_users': 50000,
+                'num_items': 100000,
+                'embedding_dim': 64,
+            },
+            # TwoTower requires user_features_dim, item_features_dim
+            'two_tower': {
+                'user_features_dim': 128,
+                'item_features_dim': 256,
+                'embedding_dim': 128,
+            },
+            # BERT4Rec requires num_items
+            'bert4rec': {
+                'num_items': 100000,
+                'max_seq_len': 50,
+                'd_model': 256,
+                'num_heads': 8,
+                'num_layers': 4,
+            },
+            # Sequential recommender
+            'sequential_recommender': {
+                'num_items': 100000,
+                'embedding_dim': 128,
+                'hidden_dim': 256,
+            },
+            # GraphSAGE
+            'graphsage': {
+                'num_users': 50000,
+                'num_items': 100000,
+                'embedding_dim': 128,
+            },
+            # Transformer recommender
+            'transformer_recommender': {
+                'num_items': 100000,
+                'd_model': 256,
+                'num_heads': 8,
+                'num_layers': 4,
+            },
+            # VAE recommender - uses num_items and latent_dim
+            'vae_recommender': {
+                'num_items': 100000,
+                'latent_dim': 50,
+            },
+            # GNN recommender
+            'gnn_recommender': {
+                'num_users': 50000,
+                'num_items': 100000,
+                'embedding_dim': 128,
+            },
+            # Enhanced two tower - requires categorical dims as dicts
+            'enhanced_two_tower': {
+                'user_categorical_dims': {'user_type': 10},
+                'user_numerical_dim': 32,
+                'item_categorical_dims': {'genre': 30},
+                'item_numerical_dim': 64,
+                'embedding_dim': 128,
+            },
+            # Sentence BERT two tower
+            'sentence_bert_two_tower': {
+                'embedding_dim': 128,
+                'hidden_dim': 256,
+            },
+            # T5 hybrid
+            't5_hybrid': {
+                'num_items': 100000,
+                'embedding_dim': 128,
+            },
+            # Unified content recommender
+            'unified_content': {
+                'num_users': 50000,
+                'num_items': 100000,
+                'embedding_dim': 128,
+            },
+            # TV models without config classes
+            'tv_temporal_attention': {
+                'vocab_sizes': {'shows': 50000, 'genres': 50, 'networks': 100},
+                'd_model': 512,
+            },
+            'tv_graph_neural': {
+                'num_shows': 50000,
+                'num_actors': 100000,
+                'num_genres': 50,
+                'num_networks': 100,
+                'num_creators': 20000,
+            },
+            'tv_contrastive': {
+                'vocab_sizes': {'shows': 50000, 'genres': 50, 'networks': 100},
+                'embed_dim': 768,
+            },
+            'tv_meta_learning': {
+                # All defaults work - no positional args required
+                'base_feature_dim': 1024,
+            },
+            'tv_ensemble': {
+                # This model requires pre-built models - mark as skip
+                '_skip': True,
+            },
+            'tv_multimodal': {
+                'vocab_sizes': {'shows': 50000, 'genres': 50, 'networks': 100},
+                'num_shows': 50000,
+            },
+            # Unified models
+            'cross_domain_embeddings': {
+                'num_users': 50000,
+                'num_movies': 100000,
+                'num_tv_shows': 50000,
+                'embedding_dim': 512,
+            },
+            'movie_ensemble': {
+                'num_users': 50000,
+                'num_movies': 100000,
+            },
+            'unified_contrastive': {
+                # Requires base_model parameter - mark as skip
+                '_skip': True,
+            },
+            'multimodal_features': {
+                # All defaults work - no positional args required
+                'final_output_dim': 768,
+            },
+            'context_aware': {
+                # Requires base_recommender parameter - mark as skip
+                '_skip': True,
+            },
+        }
+
+        # Return model-specific args if available, otherwise return generic defaults
+        if self.model_name in model_specific_args:
+            return model_specific_args[self.model_name]
+
+        # Generic defaults as fallback
+        return {
             'num_users': 50000,
             'num_items': 100000,
-            'num_movies': 100000,
-            'num_shows': 50000,
-            'user_features_dim': 128,
-            'item_features_dim': 256,
             'embedding_dim': 128,
             'hidden_dim': 256,
-            'd_model': 256,
-            'num_heads': 8,
-            'num_layers': 4,
-            'dropout': 0.1,
-            'vocab_sizes': {'shows': 50000, 'genres': 50, 'networks': 100},
         }
-        return defaults
 
     def create_dataloaders(self, batch_size: int = 256, num_workers: int = 4) -> tuple:
         """Create train and validation dataloaders"""

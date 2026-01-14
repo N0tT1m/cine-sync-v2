@@ -637,3 +637,5 @@ def get_ensemble_config():
         'gradient_accumulation_steps': 2,
         'max_grad_norm': 0.5,
     }
+# Alias for backward compatibility
+TVEnsembleSystem = TVEnsembleRecommender

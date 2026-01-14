@@ -628,3 +628,6 @@ if __name__ == "__main__":
     print(f"Top 10 movie recommendations for user {user_id}:")
     print(f"Movie IDs: {top_movies}")
     print(f"Scores: {scores}")
+
+# Alias for backward compatibility
+CrossDomainEmbeddings = CrossDomainRecommender

@@ -656,3 +656,6 @@ if __name__ == "__main__":
     print(f"Scores: {results['scores']}")
     print(f"Predicted ratings: {results['ratings']}")
     print(f"Confidence: {results['confidences']}")
+
+# Alias for backward compatibility
+MovieEnsembleSystem = MovieEnsembleRecommender

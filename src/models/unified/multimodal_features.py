@@ -634,3 +634,6 @@ if __name__ == "__main__":
 
     fused = fusion({'text': text_features, 'metadata': metadata_features})
     print(f"Fused features shape: {fused.shape}")
+
+# Alias for backward compatibility
+MultimodalFeatures = CompleteMultimodalEncoder

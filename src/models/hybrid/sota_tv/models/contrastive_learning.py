@@ -499,3 +499,5 @@ def get_contrastive_config():
         'gradient_accumulation_steps': 2,
         'max_grad_norm': 1.0,
     }
+# Alias for backward compatibility
+ContrastiveTVLearning = ContrastiveTVModel
