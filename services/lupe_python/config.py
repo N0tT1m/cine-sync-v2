@@ -32,6 +32,7 @@ class Config:
     model: ModelConfig
     discord: DiscordConfig
     debug: bool = False
+    recommendation_api_url: str = "http://192.168.1.64:5001"
 
 
 def load_config() -> Config:
@@ -62,10 +63,12 @@ def load_config() -> Config:
     
     # General config
     debug = os.getenv("DEBUG", "false").lower() in ("true", "1", "yes")
-    
+    recommendation_api_url = os.getenv("RECOMMENDATION_API_URL", "http://192.168.1.64:5001")
+
     return Config(
         database=database,
         model=model,
         discord=discord,
-        debug=debug
+        debug=debug,
+        recommendation_api_url=recommendation_api_url
     )
