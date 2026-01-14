@@ -54,8 +54,10 @@ class StudioEncoder(nn.Module):
         self.studio_type_embedding = nn.Embedding(6, config.embedding_dim // 4)
 
         # Combine features
+        # Input: studio(256) + dist(128) + prod(128) + char(64) + type(64) = 640
+        fusion_input_dim = config.embedding_dim + config.embedding_dim // 2 + config.embedding_dim // 2 + config.embedding_dim // 4 + config.embedding_dim // 4
         self.studio_fusion = nn.Sequential(
-            nn.Linear(config.embedding_dim * 2, config.hidden_dim),
+            nn.Linear(fusion_input_dim, config.hidden_dim),
             nn.GELU(),
             nn.Dropout(config.dropout),
             nn.Linear(config.hidden_dim, config.hidden_dim)

@@ -37,22 +37,22 @@ class UniverseGraphAttention(nn.Module):
         super().__init__()
         self.config = config
 
-        # Connection type embeddings
-        self.connection_types = nn.Embedding(10, config.embedding_dim)
+        # Connection type embeddings (use hidden_dim to match projected input)
+        self.connection_types = nn.Embedding(10, config.hidden_dim)
         # Types: direct_sequel, prequel, spinoff, crossover, post_credits,
         #        shared_character, same_timeline, alternate_timeline, multiverse, cameo
 
-        # Graph attention layers
+        # Graph attention layers (use hidden_dim to match movie_proj output)
         self.attention = nn.MultiheadAttention(
-            config.embedding_dim, config.num_heads, dropout=config.dropout, batch_first=True
+            config.hidden_dim, config.num_heads, dropout=config.dropout, batch_first=True
         )
 
         # Edge feature network
         self.edge_mlp = nn.Sequential(
-            nn.Linear(config.embedding_dim * 2, config.embedding_dim),
+            nn.Linear(config.hidden_dim * 2, config.hidden_dim),
             nn.GELU(),
             nn.Dropout(config.dropout),
-            nn.Linear(config.embedding_dim, config.embedding_dim)
+            nn.Linear(config.hidden_dim, config.hidden_dim)
         )
 
     def forward(self, movie_features: torch.Tensor, adjacency: torch.Tensor,
