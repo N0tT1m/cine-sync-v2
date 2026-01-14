@@ -49,6 +49,45 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def check_gpu_availability() -> str:
+    """Check GPU availability and return the best device with diagnostic info"""
+    logger.info("=" * 60)
+    logger.info("GPU DIAGNOSTICS")
+    logger.info("=" * 60)
+
+    logger.info(f"PyTorch version: {torch.__version__}")
+    logger.info(f"CUDA available: {torch.cuda.is_available()}")
+
+    if torch.cuda.is_available():
+        logger.info(f"CUDA version: {torch.version.cuda}")
+        logger.info(f"cuDNN version: {torch.backends.cudnn.version()}")
+        logger.info(f"GPU count: {torch.cuda.device_count()}")
+
+        for i in range(torch.cuda.device_count()):
+            props = torch.cuda.get_device_properties(i)
+            logger.info(f"GPU {i}: {props.name}")
+            logger.info(f"  - Memory: {props.total_memory / 1024**3:.1f} GB")
+            logger.info(f"  - Compute capability: {props.major}.{props.minor}")
+
+        device = 'cuda'
+        logger.info(f"Using device: {device}")
+    else:
+        logger.warning("CUDA is NOT available. Training will use CPU (much slower).")
+        logger.warning("To enable GPU training, ensure you have:")
+        logger.warning("  1. NVIDIA GPU with CUDA support")
+        logger.warning("  2. CUDA toolkit installed (nvcc --version)")
+        logger.warning("  3. PyTorch with CUDA support: pip install torch --index-url https://download.pytorch.org/whl/cu121")
+
+        # Check if this is a PyTorch CPU-only build
+        if hasattr(torch.version, 'cuda') and torch.version.cuda is None:
+            logger.warning("  -> PyTorch appears to be a CPU-only build!")
+
+        device = 'cpu'
+
+    logger.info("=" * 60)
+    return device
+
+
 class ModelCategory(Enum):
     """Model category enumeration"""
     MOVIE_SPECIFIC = "movie"
@@ -492,16 +531,331 @@ class UnifiedDataset(Dataset):
         return self._generate_synthetic_data()
 
     def _generate_synthetic_data(self, size: int = 10000) -> List[Dict]:
-        """Generate synthetic training data"""
+        """Generate synthetic training data with model-specific fields"""
         data = []
+
+        # Model-specific data schemas
+        schema = self._get_model_schema()
+
         for _ in range(size):
-            sample = {
-                'user_ids': np.random.randint(0, 50000),
-                'item_ids': np.random.randint(0, 100000),
-                'ratings': np.random.uniform(1, 5),
-            }
+            sample = {}
+            for key, spec in schema.items():
+                if spec['type'] == 'int':
+                    sample[key] = np.random.randint(0, spec.get('max', 50000))
+                elif spec['type'] == 'float':
+                    sample[key] = np.random.uniform(spec.get('min', 0), spec.get('max', 5))
+                elif spec['type'] == 'int_seq':
+                    seq_len = spec.get('seq_len', 10)
+                    sample[key] = np.random.randint(0, spec.get('max', 50000), size=seq_len)
+                elif spec['type'] == 'float_seq':
+                    seq_len = spec.get('seq_len', 10)
+                    sample[key] = np.random.uniform(
+                        spec.get('min', 0), spec.get('max', 1), size=seq_len
+                    ).astype(np.float32)
+                elif spec['type'] == 'bool':
+                    sample[key] = float(np.random.randint(0, 2))
             data.append(sample)
         return data
+
+    def _get_model_schema(self) -> Dict[str, Dict]:
+        """Get data schema for the current model"""
+        # Base schema used by generic trainer
+        base_schema = {
+            'user_ids': {'type': 'int', 'max': 50000},
+            'item_ids': {'type': 'int', 'max': 100000},
+            'ratings': {'type': 'float', 'min': 1, 'max': 5},
+        }
+
+        # Movie-specific model schemas (must match trainer.train_step() batch keys)
+        movie_schemas = {
+            'movie_franchise_sequence': {
+                'user_ids': {'type': 'int', 'max': 50000},
+                'movie_ids': {'type': 'int_seq', 'max': 100000, 'seq_len': 10},
+                'franchise_ids': {'type': 'int_seq', 'max': 10000, 'seq_len': 10},
+                'entry_types': {'type': 'int_seq', 'max': 5, 'seq_len': 10},
+                'ratings': {'type': 'float', 'min': 1, 'max': 5},
+                'next_movie': {'type': 'int', 'max': 100000},
+                'completed_franchise': {'type': 'bool'},
+            },
+            'movie_director_auteur': {
+                'user_ids': {'type': 'int', 'max': 50000},
+                'director_ids': {'type': 'int', 'max': 50000},
+                'filmography_ids': {'type': 'int_seq', 'max': 100000, 'seq_len': 15},
+                'release_years': {'type': 'int_seq', 'max': 150, 'seq_len': 15},
+                'ratings': {'type': 'float', 'min': 1, 'max': 5},
+                'target_movies': {'type': 'int', 'max': 100000},
+            },
+            'movie_cinematic_universe': {
+                'user_ids': {'type': 'int', 'max': 50000},
+                'movie_ids': {'type': 'int_seq', 'max': 100000, 'seq_len': 20},
+                'universe_ids': {'type': 'int_seq', 'max': 1000, 'seq_len': 20},
+                'universe_positions': {'type': 'int_seq', 'max': 50, 'seq_len': 20},
+                'release_positions': {'type': 'int_seq', 'max': 50, 'seq_len': 20},
+                'phases': {'type': 'int_seq', 'max': 10, 'seq_len': 20},
+                'adjacency': {'type': 'float_seq', 'seq_len': 20},  # Simplified adjacency
+                'connection_types': {'type': 'int_seq', 'max': 10, 'seq_len': 20},
+                'ratings': {'type': 'float', 'min': 1, 'max': 5},
+                'next_movie': {'type': 'int', 'max': 100000},
+                'preferred_order': {'type': 'int', 'max': 3},
+                'completed_universe': {'type': 'bool'},
+            },
+            'movie_critic_audience': {
+                'user_ids': {'type': 'int', 'max': 50000},
+                'movie_ids': {'type': 'int', 'max': 100000},
+                'metacritic_scores': {'type': 'float', 'min': 0, 'max': 100},
+                'rt_scores': {'type': 'float', 'min': 0, 'max': 100},
+                'imdb_scores': {'type': 'float', 'min': 0, 'max': 10},
+                'letterboxd_scores': {'type': 'float', 'min': 0, 'max': 5},
+                'user_ratings': {'type': 'float', 'min': 1, 'max': 5},
+            },
+            'movie_actor_collaboration': {
+                'user_ids': {'type': 'int', 'max': 50000},
+                'movie_ids': {'type': 'int', 'max': 100000},
+                'actor_ids': {'type': 'int_seq', 'max': 100000, 'seq_len': 5},
+                'role_types': {'type': 'int_seq', 'max': 10, 'seq_len': 5},
+                'career_features': {'type': 'float_seq', 'seq_len': 5},
+                'genre_distributions': {'type': 'float_seq', 'seq_len': 30},
+                'ratings': {'type': 'float', 'min': 1, 'max': 5},
+            },
+            'movie_viewing_context': {
+                'user_ids': {'type': 'int', 'max': 50000},
+                'movie_ids': {'type': 'int', 'max': 100000},
+                'social_context': {'type': 'int', 'max': 10},
+                'time_context': {'type': 'int', 'max': 24},
+                'venue': {'type': 'int', 'max': 10},
+                'duration_features': {'type': 'float_seq', 'seq_len': 2},
+                'mood_ids': {'type': 'int', 'max': 20},
+                'energy_level': {'type': 'float', 'min': 0, 'max': 1},
+                'desired_outcome': {'type': 'int', 'max': 10},
+                'occasion_ids': {'type': 'int', 'max': 20},
+                'season_ids': {'type': 'int', 'max': 4},
+                'ratings': {'type': 'float', 'min': 1, 'max': 5},
+            },
+            'movie_awards_prediction': {
+                'user_ids': {'type': 'int', 'max': 50000},
+                'movie_ids': {'type': 'int', 'max': 100000},
+                'critic_scores': {'type': 'float', 'min': 0, 'max': 100},
+                'release_month': {'type': 'int', 'max': 12},
+                'studio_ids': {'type': 'int', 'max': 1000},
+                'distributor_ids': {'type': 'int', 'max': 500},
+                'budget_range': {'type': 'int', 'max': 10},
+                'ratings': {'type': 'float', 'min': 1, 'max': 5},
+                'nominations': {'type': 'int', 'max': 20},
+                'wins': {'type': 'int', 'max': 10},
+                'prestige_score': {'type': 'float', 'min': 0, 'max': 1},
+            },
+            'movie_runtime_preference': {
+                'user_ids': {'type': 'int', 'max': 50000},
+                'movie_ids': {'type': 'int', 'max': 100000},
+                'runtime_minutes': {'type': 'int', 'max': 300},
+                'genre_ids': {'type': 'int', 'max': 30},
+                'ratings': {'type': 'float', 'min': 1, 'max': 5},
+            },
+            'movie_era_style': {
+                'user_ids': {'type': 'int', 'max': 50000},
+                'movie_ids': {'type': 'int', 'max': 100000},
+                'era_ids': {'type': 'int', 'max': 15},
+                'decade_ids': {'type': 'int', 'max': 15},
+                'years': {'type': 'int', 'max': 2030},
+                'visual_styles': {'type': 'int', 'max': 50},
+                'audio_styles': {'type': 'int', 'max': 50},
+                'ratings': {'type': 'float', 'min': 1, 'max': 5},
+            },
+            'movie_remake_connection': {
+                'user_ids': {'type': 'int', 'max': 50000},
+                'original_ids': {'type': 'int', 'max': 100000},
+                'remake_ids': {'type': 'int', 'max': 100000},
+                'version_types': {'type': 'int', 'max': 10},
+                'year_gaps': {'type': 'int', 'max': 100},
+                'quality_features': {'type': 'float_seq', 'seq_len': 8},
+                'ratings': {'type': 'float', 'min': 1, 'max': 5},
+            },
+            'movie_studio_fingerprint': {
+                'user_ids': {'type': 'int', 'max': 50000},
+                'movie_ids': {'type': 'int', 'max': 100000},
+                'studio_ids': {'type': 'int', 'max': 1000},
+                'distributor_ids': {'type': 'int', 'max': 500},
+                'prod_company_ids': {'type': 'int', 'max': 2000},
+                'characteristics': {'type': 'float_seq', 'seq_len': 16},
+                'studio_types': {'type': 'int', 'max': 10},
+                'genre_dist': {'type': 'float_seq', 'seq_len': 30},
+                'budget_quality': {'type': 'float_seq', 'seq_len': 4},
+                'franchise_features': {'type': 'float_seq', 'seq_len': 8},
+                'ratings': {'type': 'float', 'min': 1, 'max': 5},
+            },
+            'movie_adaptation_source': {
+                'user_ids': {'type': 'int', 'max': 50000},
+                'movie_ids': {'type': 'int', 'max': 100000},
+                'source_type_ids': {'type': 'int', 'max': 10},
+                'source_ids': {'type': 'int', 'max': 50000},
+                'characteristics': {'type': 'float_seq', 'seq_len': 16},
+                'genre_features': {'type': 'float_seq', 'seq_len': 30},
+                'faithfulness': {'type': 'float', 'min': 0, 'max': 1},
+                'reception': {'type': 'float', 'min': 0, 'max': 1},
+                'adaptation_types': {'type': 'int', 'max': 10},
+                'ratings': {'type': 'float', 'min': 1, 'max': 5},
+            },
+            'movie_international': {
+                'user_ids': {'type': 'int', 'max': 50000},
+                'movie_ids': {'type': 'int', 'max': 100000},
+                'country_ids': {'type': 'int', 'max': 200},
+                'region_ids': {'type': 'int', 'max': 20},
+                'language_ids': {'type': 'int', 'max': 100},
+                'country_characteristics': {'type': 'float_seq', 'seq_len': 16},
+                'narrative_styles': {'type': 'int', 'max': 20},
+                'pacing': {'type': 'float', 'min': 0, 'max': 1},
+                'genre_dist': {'type': 'float_seq', 'seq_len': 30},
+                'visual_styles': {'type': 'int', 'max': 50},
+                'ratings': {'type': 'float', 'min': 1, 'max': 5},
+            },
+            'movie_narrative_complexity': {
+                'user_ids': {'type': 'int', 'max': 50000},
+                'movie_ids': {'type': 'int', 'max': 100000},
+                'structure_ids': {'type': 'int', 'max': 20},
+                'complexity_features': {'type': 'float_seq', 'seq_len': 8},
+                'theme_vector': {'type': 'float_seq', 'seq_len': 50},
+                'dialogue_features': {'type': 'float_seq', 'seq_len': 8},
+                'ratings': {'type': 'float', 'min': 1, 'max': 5},
+            },
+        }
+
+        # TV-specific model schemas
+        tv_schemas = {
+            'tv_temporal_attention': {
+                'user_ids': {'type': 'int', 'max': 50000},
+                'show_ids': {'type': 'int_seq', 'max': 50000, 'seq_len': 20},
+                'timestamps': {'type': 'int_seq', 'max': 1000000, 'seq_len': 20},
+                'ratings': {'type': 'float', 'min': 1, 'max': 5},
+            },
+            'tv_graph_neural': {
+                'user_ids': {'type': 'int', 'max': 50000},
+                'show_ids': {'type': 'int', 'max': 50000},
+                'ratings': {'type': 'float', 'min': 1, 'max': 5},
+            },
+            'tv_contrastive': {
+                'user_ids': {'type': 'int', 'max': 50000},
+                'show_ids': {'type': 'int', 'max': 50000},
+                'positive_ids': {'type': 'int', 'max': 50000},
+                'negative_ids': {'type': 'int', 'max': 50000},
+                'ratings': {'type': 'float', 'min': 1, 'max': 5},
+            },
+            'tv_meta_learning': {
+                'user_ids': {'type': 'int', 'max': 50000},
+                'show_ids': {'type': 'int_seq', 'max': 50000, 'seq_len': 10},
+                'ratings': {'type': 'float', 'min': 1, 'max': 5},
+            },
+            'tv_ensemble': {
+                'user_ids': {'type': 'int', 'max': 50000},
+                'show_ids': {'type': 'int', 'max': 50000},
+                'ratings': {'type': 'float', 'min': 1, 'max': 5},
+            },
+            'tv_multimodal': {
+                'user_ids': {'type': 'int', 'max': 50000},
+                'show_ids': {'type': 'int', 'max': 50000},
+                'ratings': {'type': 'float', 'min': 1, 'max': 5},
+            },
+            'tv_episode_sequence': {
+                'user_ids': {'type': 'int', 'max': 50000},
+                'show_ids': {'type': 'int', 'max': 50000},
+                'episode_ids': {'type': 'int_seq', 'max': 10000, 'seq_len': 20},
+                'ratings': {'type': 'float', 'min': 1, 'max': 5},
+            },
+            'tv_binge_prediction': {
+                'user_ids': {'type': 'int', 'max': 50000},
+                'show_ids': {'type': 'int', 'max': 50000},
+                'episode_counts': {'type': 'int', 'max': 100},
+                'binge_label': {'type': 'bool'},
+                'ratings': {'type': 'float', 'min': 1, 'max': 5},
+            },
+            'tv_series_completion': {
+                'user_ids': {'type': 'int', 'max': 50000},
+                'show_ids': {'type': 'int', 'max': 50000},
+                'episodes_watched': {'type': 'int', 'max': 500},
+                'total_episodes': {'type': 'int', 'max': 500},
+                'completed': {'type': 'bool'},
+                'ratings': {'type': 'float', 'min': 1, 'max': 5},
+            },
+            'tv_season_quality': {
+                'user_ids': {'type': 'int', 'max': 50000},
+                'show_ids': {'type': 'int', 'max': 50000},
+                'season_ids': {'type': 'int', 'max': 30},
+                'ratings': {'type': 'float', 'min': 1, 'max': 5},
+            },
+            'tv_platform_availability': {
+                'user_ids': {'type': 'int', 'max': 50000},
+                'show_ids': {'type': 'int', 'max': 50000},
+                'platform_ids': {'type': 'int', 'max': 50},
+                'ratings': {'type': 'float', 'min': 1, 'max': 5},
+            },
+            'tv_watch_pattern': {
+                'user_ids': {'type': 'int', 'max': 50000},
+                'show_ids': {'type': 'int', 'max': 50000},
+                'watch_times': {'type': 'int_seq', 'max': 24, 'seq_len': 10},
+                'ratings': {'type': 'float', 'min': 1, 'max': 5},
+            },
+            'tv_series_lifecycle': {
+                'user_ids': {'type': 'int', 'max': 50000},
+                'show_ids': {'type': 'int', 'max': 50000},
+                'lifecycle_stage': {'type': 'int', 'max': 5},
+                'ratings': {'type': 'float', 'min': 1, 'max': 5},
+            },
+            'tv_cast_migration': {
+                'user_ids': {'type': 'int', 'max': 50000},
+                'show_ids': {'type': 'int', 'max': 50000},
+                'cast_ids': {'type': 'int_seq', 'max': 100000, 'seq_len': 10},
+                'ratings': {'type': 'float', 'min': 1, 'max': 5},
+            },
+        }
+
+        # Content-agnostic schemas (use base with item_ids)
+        agnostic_schemas = {
+            'ncf': base_schema,
+            'sequential_recommender': {
+                'user_ids': {'type': 'int', 'max': 50000},
+                'item_ids': {'type': 'int_seq', 'max': 100000, 'seq_len': 20},
+                'ratings': {'type': 'float', 'min': 1, 'max': 5},
+            },
+            'two_tower': base_schema,
+            'bert4rec': {
+                'user_ids': {'type': 'int', 'max': 50000},
+                'item_ids': {'type': 'int_seq', 'max': 100000, 'seq_len': 50},
+                'ratings': {'type': 'float', 'min': 1, 'max': 5},
+            },
+            'graphsage': base_schema,
+            'transformer_recommender': {
+                'user_ids': {'type': 'int', 'max': 50000},
+                'item_ids': {'type': 'int_seq', 'max': 100000, 'seq_len': 30},
+                'ratings': {'type': 'float', 'min': 1, 'max': 5},
+            },
+            'vae_recommender': base_schema,
+            'gnn_recommender': base_schema,
+            'enhanced_two_tower': base_schema,
+            'sentence_bert_two_tower': base_schema,
+            't5_hybrid': base_schema,
+            'unified_content': base_schema,
+        }
+
+        # Unified model schemas
+        unified_schemas = {
+            'cross_domain_embeddings': {
+                'user_ids': {'type': 'int', 'max': 50000},
+                'movie_ids': {'type': 'int', 'max': 100000},
+                'show_ids': {'type': 'int', 'max': 50000},
+                'ratings': {'type': 'float', 'min': 1, 'max': 5},
+            },
+            'movie_ensemble': base_schema,
+            'unified_contrastive': base_schema,
+            'multimodal_features': base_schema,
+            'context_aware': {
+                'user_ids': {'type': 'int', 'max': 50000},
+                'item_ids': {'type': 'int', 'max': 100000},
+                'context_ids': {'type': 'int', 'max': 50},
+                'ratings': {'type': 'float', 'min': 1, 'max': 5},
+            },
+        }
+
+        all_schemas = {**movie_schemas, **tv_schemas, **agnostic_schemas, **unified_schemas}
+        return all_schemas.get(self.model_name, base_schema)
 
     def __len__(self) -> int:
         return len(self.data)
@@ -654,13 +1008,16 @@ class UnifiedTrainingPipeline:
         train_dataset = UnifiedDataset(self.data_dir, content_type, self.model_name, 'train')
         val_dataset = UnifiedDataset(self.data_dir, content_type, self.model_name, 'val')
 
+        # Only use pin_memory when CUDA is available
+        use_pin_memory = torch.cuda.is_available()
+
         train_loader = DataLoader(
             train_dataset, batch_size=batch_size, shuffle=True,
-            num_workers=num_workers, collate_fn=collate_fn, pin_memory=True
+            num_workers=num_workers, collate_fn=collate_fn, pin_memory=use_pin_memory
         )
         val_loader = DataLoader(
             val_dataset, batch_size=batch_size, shuffle=False,
-            num_workers=num_workers, collate_fn=collate_fn, pin_memory=True
+            num_workers=num_workers, collate_fn=collate_fn, pin_memory=use_pin_memory
         )
 
         return train_loader, val_loader
@@ -941,11 +1298,21 @@ Examples:
         list_models()
         return
 
+    # Run GPU diagnostics and determine best device
+    detected_device = check_gpu_availability()
+
+    # Use detected device if user specified 'cuda' but it's not available
+    if args.device == 'cuda' and not torch.cuda.is_available():
+        logger.warning(f"Requested device 'cuda' not available, falling back to '{detected_device}'")
+        device = detected_device
+    else:
+        device = args.device
+
     training_kwargs = {
         'epochs': args.epochs,
         'batch_size': args.batch_size,
         'lr': args.lr,
-        'device': args.device,
+        'device': device,
         'use_wandb': args.wandb
     }
 
