@@ -2027,6 +2027,24 @@ class UnifiedTrainingPipeline:
 # MAIN FUNCTIONS
 # ============================================================================
 
+def model_checkpoint_exists(model_name: str, output_dir: str, category: ModelCategory) -> bool:
+    """Check if a trained model checkpoint already exists"""
+    category_dirs = {
+        ModelCategory.MOVIE_SPECIFIC: 'movies',
+        ModelCategory.TV_SPECIFIC: 'tv',
+        ModelCategory.CONTENT_AGNOSTIC: 'unified',
+        ModelCategory.UNIFIED: 'unified'
+    }
+    category_dir = category_dirs.get(category, 'unified')
+    model_dir = Path(output_dir) / category_dir / model_name
+
+    # Check for any checkpoint file
+    best_checkpoint = model_dir / 'checkpoint_best.pt'
+    final_checkpoint = model_dir / 'checkpoint_final.pt'
+
+    return best_checkpoint.exists() or final_checkpoint.exists()
+
+
 def train_category(
     category: ModelCategory,
     data_dir: str,
@@ -2047,7 +2065,17 @@ def train_category(
     # Sort by priority (higher priority first)
     sorted_models = sorted(models.items(), key=lambda x: x[1].get('priority', 0), reverse=True)
 
+    skip_existing = training_kwargs.get('skip_existing', False)
+
     for model_name, info in sorted_models:
+        # Check if we should skip existing models
+        if skip_existing and model_checkpoint_exists(model_name, output_dir, category):
+            logger.info(f"\n{'='*60}")
+            logger.info(f"SKIPPING: {model_name} (checkpoint already exists)")
+            logger.info(f"{'='*60}\n")
+            results[model_name] = {'status': 'skipped', 'reason': 'checkpoint exists'}
+            continue
+
         logger.info(f"\n{'='*60}")
         logger.info(f"Training: {model_name}")
         logger.info(f"Description: {info['description']}")
@@ -2236,6 +2264,10 @@ Examples:
   # Train everything
   python train_all_models.py --all
 
+  # Train only models that don't have existing checkpoints
+  python train_all_models.py --all --skip-existing
+  python train_all_models.py --category movie --skip-existing
+
   # List all models
   python train_all_models.py --list-models
         """
@@ -2246,6 +2278,8 @@ Examples:
                        help='Train all models in category')
     parser.add_argument('--all', action='store_true', help='Train all models')
     parser.add_argument('--list-models', action='store_true', help='List available models')
+    parser.add_argument('--skip-existing', action='store_true',
+                       help='Skip models that already have trained weights')
 
     # Use relative paths (portable across machines)
     project_root = Path(__file__).resolve().parent.parent.parent
@@ -2296,7 +2330,8 @@ Examples:
         'device': device,
         'use_wandb': args.wandb,
         'publish_to_registry': should_publish,
-        'registry_path': args.registry_path
+        'registry_path': args.registry_path,
+        'skip_existing': args.skip_existing
     }
 
     # Log registry info if publishing
@@ -2339,6 +2374,13 @@ Examples:
         if args.model not in ALL_MODELS:
             print(f"Unknown model: {args.model}")
             print("Use --list-models to see available models")
+            return
+
+        # Check if we should skip existing model
+        model_category = ALL_MODELS[args.model]['category']
+        if args.skip_existing and model_checkpoint_exists(args.model, args.output_dir, model_category):
+            print(f"\nSKIPPING: {args.model} (checkpoint already exists)")
+            print("Use without --skip-existing to retrain")
             return
 
         pipeline = UnifiedTrainingPipeline(
