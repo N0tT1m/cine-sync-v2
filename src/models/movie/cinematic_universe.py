@@ -105,11 +105,11 @@ class TimelineEncoder(nn.Module):
         # Phase/saga encoding (e.g., MCU phases)
         self.phase_embedding = nn.Embedding(20, config.embedding_dim)
 
-        # Timeline fusion
+        # Timeline fusion (outputs hidden_dim to match movie_proj output)
         self.timeline_fusion = nn.Sequential(
-            nn.Linear(config.embedding_dim * 3, config.embedding_dim),
+            nn.Linear(config.embedding_dim * 3, config.hidden_dim),
             nn.GELU(),
-            nn.Linear(config.embedding_dim, config.embedding_dim)
+            nn.Linear(config.hidden_dim, config.hidden_dim)
         )
 
     def forward(self, universe_positions: torch.Tensor, release_positions: torch.Tensor,

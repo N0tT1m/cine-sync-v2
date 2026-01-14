@@ -84,11 +84,11 @@ class CollaborationEncoder(nn.Module):
             nn.Linear(config.hidden_dim, config.hidden_dim)
         )
 
-        # Collaboration history
+        # Collaboration history (outputs hidden_dim to match chemistry_encoder)
         self.collab_history = nn.Sequential(
             nn.Linear(5, config.embedding_dim // 4),  # num_films_together, avg_rating, years_span, genre_overlap, role_consistency
             nn.GELU(),
-            nn.Linear(config.embedding_dim // 4, config.embedding_dim // 4)
+            nn.Linear(config.embedding_dim // 4, config.hidden_dim)
         )
 
         # Multi-head attention for ensemble dynamics

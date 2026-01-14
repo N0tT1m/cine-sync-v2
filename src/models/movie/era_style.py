@@ -55,8 +55,10 @@ class EraEncoder(nn.Module):
         self.audio_embedding = nn.Embedding(config.num_audio_styles, config.embedding_dim // 4)
 
         # Combine era features
+        # Input: era(256) + decade(128) + year(64) + visual(64) + audio(64) = 576
+        era_input_dim = config.embedding_dim + config.embedding_dim // 2 + config.embedding_dim // 4 * 3
         self.era_fusion = nn.Sequential(
-            nn.Linear(config.embedding_dim * 2, config.hidden_dim),
+            nn.Linear(era_input_dim, config.hidden_dim),
             nn.GELU(),
             nn.Dropout(config.dropout),
             nn.Linear(config.hidden_dim, config.hidden_dim)

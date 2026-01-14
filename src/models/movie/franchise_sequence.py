@@ -129,8 +129,8 @@ class FranchiseSequenceEncoder(nn.Module):
         self.movie_embedding = nn.Embedding(config.num_movies, config.embedding_dim)
         self.franchise_embedding = nn.Embedding(config.num_franchises, config.embedding_dim)
 
-        # Positional encoding
-        self.pos_encoding = FranchisePositionalEncoding(config.embedding_dim, config.max_franchise_length)
+        # Positional encoding (must match hidden_dim since it's added after input_proj)
+        self.pos_encoding = FranchisePositionalEncoding(config.hidden_dim, config.max_franchise_length)
 
         # Entry type embedding (original, sequel, prequel, spinoff, reboot)
         self.entry_type_embedding = nn.Embedding(5, config.embedding_dim)
