@@ -45,6 +45,14 @@ try:
 except ImportError:
     WANDB_AVAILABLE = False
 
+# Model registry for publishing trained models
+try:
+    from model_registry import LocalModelRegistry, get_model_registry
+    REGISTRY_AVAILABLE = True
+except ImportError:
+    REGISTRY_AVAILABLE = False
+    LocalModelRegistry = None
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -1508,12 +1516,20 @@ class UnifiedTrainingPipeline:
     def __init__(
         self,
         model_name: str,
-        data_dir: str = '/Users/timmy/workspace/ai-apps/cine-sync-v2/data',
-        output_dir: str = '/Users/timmy/workspace/ai-apps/cine-sync-v2/models',
+        data_dir: str = None,
+        output_dir: str = None,
         device: str = 'cuda',
         use_wandb: bool = False,
         wandb_project: str = 'cinesync-models'
     ):
+        # Use paths relative to project root (portable across machines)
+        # Script is at: cine-sync-v2/src/training/train_all_models.py
+        project_root = Path(__file__).resolve().parent.parent.parent
+        cinesync_root = Path(os.getenv('CINESYNC_ROOT', str(project_root)))
+        if data_dir is None:
+            data_dir = os.getenv('CINESYNC_DATA_DIR', str(cinesync_root / 'data'))
+        if output_dir is None:
+            output_dir = os.getenv('CINESYNC_MODELS_DIR', str(cinesync_root / 'models'))
         self.model_name = model_name
         self.data_dir = Path(data_dir)
         self.output_dir = Path(output_dir)
@@ -2049,11 +2065,113 @@ def train_category(
             )
             result = pipeline.train(**training_kwargs)
             results[model_name] = {'status': 'success', 'result': result}
+
+            # Publish to registry if enabled
+            if training_kwargs.get('publish_to_registry') and REGISTRY_AVAILABLE:
+                try:
+                    publish_model_to_registry(
+                        model_name=model_name,
+                        output_dir=output_dir,
+                        category=category,
+                        result=result,
+                        training_kwargs=training_kwargs,
+                        registry_path=training_kwargs.get('registry_path')
+                    )
+                    results[model_name]['published'] = True
+                except Exception as pub_e:
+                    logger.warning(f"Failed to publish {model_name} to registry: {pub_e}")
+                    results[model_name]['published'] = False
+
         except Exception as e:
             logger.error(f"Failed: {model_name} - {e}")
             results[model_name] = {'status': 'failed', 'error': str(e)}
 
     return results
+
+
+def publish_model_to_registry(
+    model_name: str,
+    output_dir: str,
+    category: ModelCategory,
+    result: Dict[str, Any],
+    training_kwargs: Dict[str, Any],
+    registry_path: str = None
+) -> str:
+    """
+    Publish a trained model to the local model registry.
+
+    Args:
+        model_name: Name of the model
+        output_dir: Directory where checkpoints are saved
+        category: Model category (MOVIE_SPECIFIC, TV_SPECIFIC, etc.)
+        result: Training result dict with metrics
+        training_kwargs: Training configuration
+        registry_path: Optional custom registry path
+
+    Returns:
+        Version string of the published model
+    """
+    if not REGISTRY_AVAILABLE:
+        raise RuntimeError("Model registry not available")
+
+    # Determine the checkpoint path
+    category_dirs = {
+        ModelCategory.MOVIE_SPECIFIC: 'movies',
+        ModelCategory.TV_SPECIFIC: 'tv',
+        ModelCategory.CONTENT_AGNOSTIC: 'unified',
+        ModelCategory.UNIFIED: 'unified'
+    }
+    category_dir = category_dirs.get(category, 'unified')
+
+    checkpoint_path = Path(output_dir) / category_dir / model_name / 'checkpoint_best.pt'
+
+    if not checkpoint_path.exists():
+        # Try final checkpoint
+        checkpoint_path = Path(output_dir) / category_dir / model_name / 'checkpoint_final.pt'
+
+    if not checkpoint_path.exists():
+        raise FileNotFoundError(f"No checkpoint found for {model_name}")
+
+    # Determine content type
+    if category == ModelCategory.MOVIE_SPECIFIC:
+        content_type = 'movie'
+    elif category == ModelCategory.TV_SPECIFIC:
+        content_type = 'tv'
+    else:
+        content_type = 'both'
+
+    # Get registry
+    registry = get_model_registry(registry_path)
+
+    # Extract metrics from result
+    metrics = result.get('history', {})
+    if isinstance(metrics, dict) and 'val_rating_mse' in str(metrics):
+        # Get last validation metrics
+        pass
+    best_val_loss = result.get('best_val_loss')
+    if best_val_loss is not None:
+        metrics = {'best_val_loss': best_val_loss}
+
+    # Publish
+    version = registry.publish_model(
+        model_name=model_name,
+        checkpoint_path=str(checkpoint_path),
+        category=category_dir,
+        content_type=content_type,
+        metrics=metrics,
+        training_config={
+            'epochs': training_kwargs.get('epochs'),
+            'batch_size': training_kwargs.get('batch_size'),
+            'lr': training_kwargs.get('lr'),
+            'device': training_kwargs.get('device')
+        },
+        description=ALL_MODELS.get(model_name, {}).get('description'),
+        epochs=result.get('epochs_trained'),
+        gpu_profile=training_kwargs.get('gpu_profile')
+    )
+
+    logger.info(f"Published {model_name} to registry as {version}")
+    return version
 
 
 def train_all(data_dir: str, output_dir: str, **training_kwargs) -> Dict[str, Any]:
@@ -2128,17 +2246,28 @@ Examples:
     parser.add_argument('--all', action='store_true', help='Train all models')
     parser.add_argument('--list-models', action='store_true', help='List available models')
 
+    # Use relative paths (portable across machines)
+    project_root = Path(__file__).resolve().parent.parent.parent
     parser.add_argument('--data-dir', type=str,
-                       default='/Users/timmy/workspace/ai-apps/cine-sync-v2/data',
+                       default=os.getenv('CINESYNC_DATA_DIR', str(project_root / 'data')),
                        help='Data directory')
     parser.add_argument('--output-dir', type=str,
-                       default='/Users/timmy/workspace/ai-apps/cine-sync-v2/models',
+                       default=os.getenv('CINESYNC_MODELS_DIR', str(project_root / 'models')),
                        help='Output directory')
     parser.add_argument('--epochs', type=int, default=50, help='Training epochs')
     parser.add_argument('--batch-size', type=int, default=256, help='Batch size')
     parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate')
     parser.add_argument('--device', type=str, default='cuda', help='Device')
     parser.add_argument('--wandb', action='store_true', help='Enable WandB')
+
+    # Model registry options (publish is automatic by default)
+    parser.add_argument('--publish', action='store_true', default=True,
+                       help='Publish trained models to the local model registry (default: enabled)')
+    parser.add_argument('--no-publish', action='store_true',
+                       help='Disable automatic publishing to model registry')
+    parser.add_argument('--registry-path', type=str,
+                       default=os.getenv('CINESYNC_MODEL_REGISTRY', str(project_root / 'model-registry')),
+                       help='Path to the local model registry')
 
     args = parser.parse_args()
 
@@ -2156,13 +2285,25 @@ Examples:
     else:
         device = args.device
 
+    # Determine if we should publish (default True unless --no-publish)
+    should_publish = args.publish and not args.no_publish
+
     training_kwargs = {
         'epochs': args.epochs,
         'batch_size': args.batch_size,
         'lr': args.lr,
         'device': device,
-        'use_wandb': args.wandb
+        'use_wandb': args.wandb,
+        'publish_to_registry': should_publish,
+        'registry_path': args.registry_path
     }
+
+    # Log registry info if publishing
+    if should_publish:
+        if REGISTRY_AVAILABLE:
+            logger.info(f"Model registry enabled: {args.registry_path}")
+        else:
+            logger.warning("--publish specified but model_registry module not available")
 
     if args.all:
         results = train_all(args.data_dir, args.output_dir, **training_kwargs)

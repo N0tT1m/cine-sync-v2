@@ -50,6 +50,20 @@ except ImportError as e:
     logging.warning(f"Personalization modules not available: {e}")
     PERSONALIZATION_AVAILABLE = False
 
+# Import CineSync/mommy-milk-me-v2 recommendation API client
+try:
+    from recommendation_api_client import (
+        RecommendationAPIClient,
+        RecommendationAPIConfig,
+        get_recommendation_api_client,
+        init_recommendation_api
+    )
+    RECOMMENDATION_API_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"Recommendation API client not available: {e}")
+    RECOMMENDATION_API_AVAILABLE = False
+    RecommendationAPIClient = None
+
 # Load configuration early
 config = load_config()
 
@@ -758,6 +772,23 @@ class LupeRecommendationBot(commands.Bot):
                 logger.info("Personalization system initialized successfully")
             except Exception as e:
                 logger.error(f"Failed to initialize personalization: {e}")
+
+        # Initialize CineSync/mommy-milk-me-v2 recommendation API
+        if RECOMMENDATION_API_AVAILABLE:
+            try:
+                api_url = config.recommendation_api_url
+                self.recommendation_api = get_recommendation_api_client(api_url)
+                api_healthy = await init_recommendation_api(api_url)
+                if api_healthy:
+                    logger.info(f"Connected to CineSync recommendation API at {api_url}")
+                else:
+                    logger.warning(f"CineSync API not responding at {api_url}, using local models only")
+                    self.recommendation_api = None
+            except Exception as e:
+                logger.error(f"Failed to initialize recommendation API: {e}")
+                self.recommendation_api = None
+        else:
+            self.recommendation_api = None
 
         try:
             synced = await self.tree.sync()
@@ -1863,6 +1894,381 @@ async def recommend_advanced(
     except Exception as e:
         logger.error(f"Error in recommend_advanced: {e}")
         await interaction.followup.send("Error generating advanced recommendations.")
+
+
+@bot.tree.command(name="ai_recommend", description="Get AI-powered recommendations from CineSync's 46-model ensemble")
+@app_commands.describe(
+    content_type="Type of content: movie, tv, or both",
+    genre="Genre filter (optional)",
+    limit="Number of recommendations (1-20)"
+)
+async def ai_recommend(
+    interaction: discord.Interaction,
+    content_type: Optional[str] = "both",
+    genre: Optional[str] = None,
+    limit: Optional[int] = 10
+):
+    """
+    Get AI-powered recommendations using the CineSync 46-model ensemble.
+
+    This command uses the mommy-milk-me-v2 recommendation API which combines:
+    - 14 movie-specific models (franchise, director, genre, etc.)
+    - 14 TV-specific models (temporal, graph neural, character arc, etc.)
+    - 17+ unified models (NCF, BERT4Rec, T5 Hybrid, etc.)
+    """
+    await interaction.response.defer()
+
+    try:
+        # Check if API is available
+        if not hasattr(bot, 'recommendation_api') or bot.recommendation_api is None:
+            embed = discord.Embed(
+                title="⚠️ AI API Not Available",
+                description="The CineSync AI recommendation service is not connected.\n"
+                           "Falling back to local recommendations using `/recommend`.",
+                color=0xffaa00
+            )
+            await interaction.followup.send(embed=embed)
+            return
+
+        # Validate inputs
+        content_type = (content_type or "both").lower()
+        if content_type not in ["movie", "tv", "both"]:
+            content_type = "both"
+        limit = max(1, min(limit or 10, 20))
+
+        # Use Discord user ID for personalization
+        user_id = interaction.user.id
+
+        # Call the CineSync API
+        result = await bot.recommendation_api.get_recommendations(
+            user_id=user_id,
+            content_type=content_type,
+            limit=limit,
+            genre=genre
+        )
+
+        if not result.get("success", False):
+            error_msg = result.get("error", "Unknown error")
+            embed = discord.Embed(
+                title="❌ API Error",
+                description=f"Failed to get recommendations: {error_msg}",
+                color=0xff0000
+            )
+            await interaction.followup.send(embed=embed)
+            return
+
+        recommendations = result.get("data", [])
+        if not recommendations:
+            embed = discord.Embed(
+                title="❌ No Recommendations",
+                description="No recommendations found with the current filters.",
+                color=0xff0000
+            )
+            await interaction.followup.send(embed=embed)
+            return
+
+        # Create embed
+        title_emoji = "🤖" if content_type == "both" else ("🎬" if content_type == "movie" else "📺")
+        embed = discord.Embed(
+            title=f"{title_emoji} AI Ensemble Recommendations",
+            description=f"**46-Model Ensemble** | Content: **{content_type.title()}**"
+                       f"{f' | Genre: **{genre}**' if genre else ''}",
+            color=0x00d4aa
+        )
+
+        rec_text = []
+        for i, rec in enumerate(recommendations[:limit], 1):
+            # Handle different response formats
+            title = rec.get("title") or rec.get("name", "Unknown")
+            rec_type = rec.get("content_type") or rec.get("media_type", "movie")
+            rating = rec.get("predicted_rating", 0)
+            confidence = rec.get("ensemble_confidence", 0)
+            model_count = rec.get("model_count", 0)
+            genres = rec.get("genres", "")
+
+            icon = "🎬" if rec_type == "movie" else "📺"
+
+            # Format confidence with color indicators
+            if confidence > 0.7:
+                conf_emoji = "🟢"
+            elif confidence > 0.4:
+                conf_emoji = "🟡"
+            else:
+                conf_emoji = "🔴"
+
+            rec_text.append(
+                f"{i}. {icon} **{title}**\n"
+                f"   {conf_emoji} Rating: {rating:.1f}/5 | Confidence: {confidence:.0%} | Models: {model_count}"
+            )
+
+            if genres and len(rec_text[-1]) < 200:
+                # Add genres if there's room
+                genre_list = genres.split("|")[:3] if isinstance(genres, str) else genres[:3]
+                rec_text[-1] += f"\n   🏷️ {', '.join(genre_list)}"
+
+        embed.add_field(
+            name="Top Picks",
+            value="\n".join(rec_text),
+            inline=False
+        )
+
+        # Add model info footer
+        embed.set_footer(
+            text=f"🧠 Powered by CineSync AI ({result.get('count', len(recommendations))} results) | User: {interaction.user.display_name}"
+        )
+
+        # Track this interaction for model training
+        if recommendations:
+            first_rec = recommendations[0]
+            item_id = first_rec.get("movie_id") or first_rec.get("show_id") or first_rec.get("id", 0)
+            if item_id:
+                await bot.recommendation_api.record_interaction(
+                    user_id=user_id,
+                    item_id=item_id,
+                    interaction_type="view",
+                    content_type=first_rec.get("content_type", "movie")
+                )
+
+        # Create feedback view for the recommendations
+        rec_tuples = [
+            (rec.get("movie_id") or rec.get("show_id") or rec.get("id", 0),
+             rec.get("title") or rec.get("name", "Unknown"),
+             rec.get("content_type") or rec.get("media_type", "movie"),
+             rec.get("predicted_rating", 0))
+            for rec in recommendations[:limit]
+        ]
+        view = FeedbackView(rec_tuples, "ai_ensemble", f"{content_type}_{genre}")
+
+        await interaction.followup.send(embed=embed, view=view)
+
+    except Exception as e:
+        logger.error(f"Error in ai_recommend: {e}")
+        await interaction.followup.send("Error getting AI recommendations. The service may be temporarily unavailable.")
+
+
+@bot.tree.command(name="ai_rate", description="Rate a movie/show to improve AI recommendations")
+@app_commands.describe(
+    title="Title of the movie or TV show",
+    rating="Your rating (1-5 stars)",
+    content_type="Type: movie or tv"
+)
+async def ai_rate(
+    interaction: discord.Interaction,
+    title: str,
+    rating: int,
+    content_type: Optional[str] = "movie"
+):
+    """Rate content to train the AI models and improve recommendations"""
+    await interaction.response.defer(ephemeral=True)
+
+    try:
+        # Validate rating
+        rating = max(1, min(rating, 5))
+        content_type = (content_type or "movie").lower()
+        if content_type not in ["movie", "tv"]:
+            content_type = "movie"
+
+        # Find the content ID
+        found_content = None
+        if bot.lupe:
+            found_content = find_content_by_title(title)
+
+        if not found_content:
+            embed = discord.Embed(
+                title="❌ Content Not Found",
+                description=f"Could not find '{title}' in our database.\n"
+                           f"Try using the exact title or searching first with `/search {title}`",
+                color=0xff0000
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            return
+
+        content_id, found_type = found_content
+        user_id = interaction.user.id
+
+        # Submit rating to AI API
+        if hasattr(bot, 'recommendation_api') and bot.recommendation_api:
+            result = await bot.recommendation_api.record_feedback(
+                user_id=user_id,
+                item_id=content_id,
+                rating=float(rating),
+                content_type=found_type
+            )
+
+            if result.get("success"):
+                # Also store locally
+                try:
+                    with db_manager.get_connection() as conn:
+                        cursor = conn.cursor()
+                        cursor.execute('''
+                            INSERT INTO ratings (user_id, movie_id, rating, title, content_type, timestamp)
+                            VALUES (%s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (user_id, movie_id, content_type)
+                            DO UPDATE SET rating = EXCLUDED.rating, timestamp = EXCLUDED.timestamp
+                        ''', (user_id, content_id, rating, title, found_type, datetime.now()))
+                        conn.commit()
+                except Exception as db_error:
+                    logger.warning(f"Local rating storage failed: {db_error}")
+
+                star_display = "⭐" * rating + "☆" * (5 - rating)
+                embed = discord.Embed(
+                    title="✅ Rating Recorded",
+                    description=f"**{title}** ({found_type.title()})\n"
+                               f"Rating: {star_display}\n\n"
+                               f"Your feedback will improve AI recommendations!",
+                    color=0x00ff00
+                )
+            else:
+                embed = discord.Embed(
+                    title="⚠️ Partial Success",
+                    description=f"Rating stored locally but AI API returned: {result.get('error', 'unknown error')}",
+                    color=0xffaa00
+                )
+        else:
+            # Store locally only
+            try:
+                with db_manager.get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute('''
+                        INSERT INTO ratings (user_id, movie_id, rating, title, content_type, timestamp)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (user_id, movie_id, content_type)
+                        DO UPDATE SET rating = EXCLUDED.rating, timestamp = EXCLUDED.timestamp
+                    ''', (user_id, content_id, rating, title, found_type, datetime.now()))
+                    conn.commit()
+
+                star_display = "⭐" * rating + "☆" * (5 - rating)
+                embed = discord.Embed(
+                    title="✅ Rating Recorded (Local)",
+                    description=f"**{title}** ({found_type.title()})\n"
+                               f"Rating: {star_display}\n\n"
+                               f"AI API not connected. Rating stored locally.",
+                    color=0x00ff00
+                )
+            except Exception as e:
+                logger.error(f"Failed to store rating: {e}")
+                embed = discord.Embed(
+                    title="❌ Error",
+                    description=f"Failed to store rating: {str(e)}",
+                    color=0xff0000
+                )
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    except Exception as e:
+        logger.error(f"Error in ai_rate: {e}")
+        await interaction.followup.send("Error recording rating.", ephemeral=True)
+
+
+@bot.tree.command(name="ai_status", description="Check CineSync AI recommendation service status")
+async def ai_status(interaction: discord.Interaction):
+    """Check the status of the CineSync AI recommendation service"""
+    await interaction.response.defer()
+
+    try:
+        embed = discord.Embed(
+            title="🧠 CineSync AI Status",
+            color=0x00d4aa
+        )
+
+        # Check API connection
+        if hasattr(bot, 'recommendation_api') and bot.recommendation_api:
+            health = await bot.recommendation_api.health_check()
+
+            if health.get("success"):
+                # Get detailed models status
+                models_status = await bot.recommendation_api.get_models_status()
+
+                if models_status.get("success"):
+                    data = models_status.get("data", {})
+
+                    embed.add_field(
+                        name="🟢 API Status",
+                        value="Connected and healthy",
+                        inline=True
+                    )
+                    embed.add_field(
+                        name="📊 Total Models",
+                        value=str(data.get("total_models", 0)),
+                        inline=True
+                    )
+                    embed.add_field(
+                        name="💻 Device",
+                        value=data.get("device", "Unknown"),
+                        inline=True
+                    )
+
+                    # Model categories
+                    categories = data.get("model_categories", {})
+                    if categories:
+                        cat_text = "\n".join([
+                            f"🎬 Movie: {categories.get('movie', 0)}",
+                            f"📺 TV: {categories.get('tv', 0)}",
+                            f"🔗 Unified: {categories.get('unified', 0)}"
+                        ])
+                        embed.add_field(
+                            name="📦 Model Categories",
+                            value=cat_text,
+                            inline=False
+                        )
+
+                    # GPU info if available
+                    gpu_info = data.get("gpu_inference", {})
+                    if gpu_info.get("gpu_name"):
+                        embed.add_field(
+                            name="🎮 GPU",
+                            value=f"{gpu_info.get('gpu_name')}\n"
+                                 f"Memory: {gpu_info.get('gpu_memory_allocated', 'N/A')} / {gpu_info.get('gpu_memory_total', 'N/A')}",
+                            inline=False
+                        )
+
+                    # Loaded models
+                    loaded = data.get("loaded_models", [])
+                    if loaded:
+                        # Show first 10 models
+                        model_list = ", ".join(loaded[:10])
+                        if len(loaded) > 10:
+                            model_list += f" ... +{len(loaded) - 10} more"
+                        embed.add_field(
+                            name="🔧 Loaded Models",
+                            value=model_list,
+                            inline=False
+                        )
+                else:
+                    embed.add_field(
+                        name="🟡 API Status",
+                        value="Connected but models status unavailable",
+                        inline=False
+                    )
+            else:
+                embed.add_field(
+                    name="🔴 API Status",
+                    value=f"Not healthy: {health.get('error', 'Unknown error')}",
+                    inline=False
+                )
+                embed.color = 0xff0000
+        else:
+            embed.add_field(
+                name="🔴 API Status",
+                value="Not connected - using local models only",
+                inline=False
+            )
+            embed.color = 0xffaa00
+
+        # Local bot status
+        embed.add_field(
+            name="🤖 Local Bot Status",
+            value=f"Lupe: {'✅ Ready' if bot.lupe else '❌ Not loaded'}\n"
+                 f"Movies: {len(bot.movie_lookup) if bot.movie_lookup else 0}\n"
+                 f"TV Shows: {len(bot.tv_lookup) if bot.tv_lookup else 0}",
+            inline=False
+        )
+
+        await interaction.followup.send(embed=embed)
+
+    except Exception as e:
+        logger.error(f"Error in ai_status: {e}")
+        await interaction.followup.send("Error checking AI status.")
 
 
 async def get_collaborative_recommendations(user_id: int, limit: int, genre_filter: str = None) -> List[tuple]:
