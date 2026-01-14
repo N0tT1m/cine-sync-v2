@@ -44,9 +44,9 @@ class VersionEncoder(nn.Module):
             nn.Linear(config.embedding_dim // 4, config.embedding_dim // 4)
         )
 
-        # Quality comparison features
+        # Quality comparison features (training data provides 8 features)
         self.quality_encoder = nn.Sequential(
-            nn.Linear(6, config.embedding_dim // 4),  # rating_original, rating_remake, delta, box_office_ratio, critic_delta, audience_delta
+            nn.Linear(8, config.embedding_dim // 4),  # rating_original, rating_remake, delta, box_office_ratio, critic_delta, audience_delta, etc.
             nn.GELU(),
             nn.Linear(config.embedding_dim // 4, config.embedding_dim // 4)
         )
