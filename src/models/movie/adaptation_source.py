@@ -77,16 +77,16 @@ class AdaptationQualityAnalyzer(nn.Module):
     def __init__(self, config: AdaptationConfig):
         super().__init__()
 
-        # Faithfulness features
+        # Faithfulness features (training data provides single scalar)
         self.faithfulness_encoder = nn.Sequential(
-            nn.Linear(5, config.embedding_dim // 4),  # plot_faithfulness, character_faithfulness, theme_faithfulness, tone_faithfulness, visual_faithfulness
+            nn.Linear(1, config.embedding_dim // 4),
             nn.GELU(),
             nn.Linear(config.embedding_dim // 4, config.embedding_dim // 4)
         )
 
-        # Critical reception comparison
+        # Critical reception comparison (training data provides single scalar)
         self.reception_encoder = nn.Sequential(
-            nn.Linear(4, config.embedding_dim // 4),  # source_rating, movie_rating, fan_reception, critic_reception
+            nn.Linear(1, config.embedding_dim // 4),
             nn.GELU(),
             nn.Linear(config.embedding_dim // 4, config.embedding_dim // 4)
         )
@@ -106,6 +106,12 @@ class AdaptationQualityAnalyzer(nn.Module):
     def forward(self, faithfulness: torch.Tensor, reception: torch.Tensor,
                 adaptation_types: torch.Tensor) -> torch.Tensor:
         """Analyze adaptation quality"""
+        # Reshape scalar inputs to [batch, 1]
+        if faithfulness.dim() == 1:
+            faithfulness = faithfulness.unsqueeze(-1)
+        if reception.dim() == 1:
+            reception = reception.unsqueeze(-1)
+
         faith_emb = self.faithfulness_encoder(faithfulness)
         recep_emb = self.reception_encoder(reception)
         type_emb = self.adaptation_type_embedding(adaptation_types)
