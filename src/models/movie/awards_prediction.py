@@ -378,8 +378,9 @@ class AwardsPredictionTrainer:
         )
 
         self.rating_loss = nn.MSELoss()
-        self.nomination_loss = nn.BCEWithLogitsLoss()
-        self.win_loss = nn.BCEWithLogitsLoss()
+        # Use MSE for nomination/win counts (training data provides counts, not multi-label)
+        self.nomination_loss = nn.MSELoss()
+        self.win_loss = nn.MSELoss()
         self.prestige_loss = nn.BCELoss()
 
     def train_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, float]:
@@ -405,8 +406,14 @@ class AwardsPredictionTrainer:
 
         # Compute losses
         rating_loss = self.rating_loss(outputs['rating_pred'].squeeze(), target_ratings)
-        nomination_loss = self.nomination_loss(outputs['nomination_logits'], target_nominations.float())
-        win_loss = self.win_loss(outputs['win_logits'], target_wins.float())
+
+        # For nominations/wins: use mean of sigmoid outputs vs normalized counts
+        # Normalize counts to [0, 1] range (max ~20 nominations, ~10 wins)
+        nomination_score = torch.sigmoid(outputs['nomination_logits']).mean(dim=-1)
+        win_score = torch.sigmoid(outputs['win_logits']).mean(dim=-1)
+        nomination_loss = self.nomination_loss(nomination_score, target_nominations.float() / 20.0)
+        win_loss = self.win_loss(win_score, target_wins.float() / 10.0)
+
         prestige_loss = self.prestige_loss(outputs['prestige_score'].squeeze(), target_prestige)
 
         total_loss = rating_loss + nomination_loss + win_loss + prestige_loss
