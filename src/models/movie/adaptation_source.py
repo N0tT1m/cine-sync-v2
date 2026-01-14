@@ -20,10 +20,10 @@ class AdaptationConfig:
     hidden_dim: int = 512
     num_heads: int = 8
     num_layers: int = 4
-    num_movies: int = 100000
-    num_users: int = 50000
-    num_sources: int = 50000  # Books, comics, games, etc.
-    num_source_types: int = 15  # novel, comic, manga, video_game, play, etc.
+    num_movies: int = 100001  # training data max: 100000
+    num_users: int = 50001  # training data max: 50000
+    num_sources: int = 50001  # Books, comics, games, etc. (training data max: 50000)
+    num_source_types: int = 16  # novel, comic, manga, video_game, play, etc. (training data max: 15)
     dropout: float = 0.1
 
 
@@ -91,9 +91,9 @@ class AdaptationQualityAnalyzer(nn.Module):
             nn.Linear(config.embedding_dim // 4, config.embedding_dim // 4)
         )
 
-        # Adaptation type embedding
-        self.adaptation_type_embedding = nn.Embedding(8, config.embedding_dim // 4)
-        # Types: faithful, loose, reimagining, in_name_only, compressed, expanded, combined_sources, prequel/sequel
+        # Adaptation type embedding (training data has max 15, so need 16 entries)
+        self.adaptation_type_embedding = nn.Embedding(16, config.embedding_dim // 4)
+        # Types: faithful, loose, reimagining, in_name_only, compressed, expanded, combined_sources, prequel/sequel, etc.
 
         # Combine
         self.quality_fusion = nn.Sequential(
