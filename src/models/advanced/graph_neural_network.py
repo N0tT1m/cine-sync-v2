@@ -535,15 +535,15 @@ class LightGCN(nn.Module):
     
     def __init__(
         self,
-        num_users: int,
-        num_items: int,
+        num_users: int = 50000,
+        num_items: int = 100000,
         embedding_dim: int = 128,
         num_layers: int = 3,
         dropout: float = 0.1,
         reg_weight: float = 1e-4
     ):
         super(LightGCN, self).__init__()
-        
+
         self.num_users = num_users
         self.num_items = num_items
         self.embedding_dim = embedding_dim

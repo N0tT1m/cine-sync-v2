@@ -278,8 +278,14 @@ class CinematicUniverseModel(nn.Module):
         # Add timeline encoding
         timeline_emb = self.timeline_encoder(universe_positions, release_positions, phases)
 
+        # Handle both per-batch and per-movie universe_ids
+        # If universe_emb is 2D [batch, emb_dim], expand to match movie_emb [batch, num_movies, emb_dim]
+        # If universe_emb is already 3D [batch, num_movies, emb_dim], use as-is
+        if universe_emb.dim() == 2:
+            universe_emb = universe_emb.unsqueeze(1).expand(-1, movie_emb.size(1), -1)
+
         # Combine features
-        combined = torch.cat([movie_emb, universe_emb.unsqueeze(1).expand_as(movie_emb)], dim=-1)
+        combined = torch.cat([movie_emb, universe_emb], dim=-1)
         combined = self.movie_proj(combined) + timeline_emb
 
         # Apply graph attention for universe structure

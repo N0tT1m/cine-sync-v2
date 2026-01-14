@@ -64,6 +64,11 @@ class ContextEncoder(nn.Module):
     def forward(self, social_context: torch.Tensor, time_context: torch.Tensor,
                 venue: torch.Tensor, duration_features: torch.Tensor) -> torch.Tensor:
         """Encode viewing context"""
+        # Clamp indices to valid embedding range to prevent out-of-bounds errors
+        social_context = social_context.clamp(0, 7)
+        time_context = time_context.clamp(0, 7)
+        venue = venue.clamp(0, 9)
+
         social_emb = self.social_embedding(social_context)
         time_emb = self.time_embedding(time_context)
         venue_emb = self.venue_embedding(venue)
@@ -108,6 +113,10 @@ class MoodEncoder(nn.Module):
     def forward(self, mood_ids: torch.Tensor, energy_level: torch.Tensor,
                 desired_outcome: torch.Tensor) -> torch.Tensor:
         """Encode mood"""
+        # Clamp indices to valid embedding range to prevent out-of-bounds errors
+        mood_ids = mood_ids.clamp(0, self.mood_embedding.num_embeddings - 1)
+        desired_outcome = desired_outcome.clamp(0, 9)
+
         mood_emb = self.mood_embedding(mood_ids)
         energy_emb = self.energy_encoder(energy_level.float().unsqueeze(-1))
         outcome_emb = self.outcome_embedding(desired_outcome)
@@ -142,6 +151,10 @@ class OccasionEncoder(nn.Module):
 
     def forward(self, occasion_ids: torch.Tensor, season_ids: torch.Tensor) -> torch.Tensor:
         """Encode occasion"""
+        # Clamp indices to valid embedding range to prevent out-of-bounds errors
+        occasion_ids = occasion_ids.clamp(0, self.occasion_embedding.num_embeddings - 1)
+        season_ids = season_ids.clamp(0, 3)
+
         occasion_emb = self.occasion_embedding(occasion_ids)
         season_emb = self.season_embedding(season_ids)
 
@@ -262,6 +275,10 @@ class ViewingContextModel(nn.Module):
         Forward pass for context-aware recommendations.
         """
         batch_size = user_ids.size(0)
+
+        # Clamp user and movie IDs to valid embedding range to prevent out-of-bounds errors
+        user_ids = user_ids.clamp(0, self.config.num_users - 1)
+        movie_ids = movie_ids.clamp(0, self.config.num_movies - 1)
 
         # Get user embedding
         user_emb = self.user_embedding(user_ids)

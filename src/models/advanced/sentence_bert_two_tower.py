@@ -259,17 +259,16 @@ class SentenceBERTTwoTowerModel(nn.Module):
     
     def __init__(
         self,
-        # Required parameters (no defaults)
-        # User features
-        user_categorical_dims: Dict[str, int],
-        user_numerical_dim: int,
-        num_users: int,
-        
-        # Item features
-        item_categorical_dims: Dict[str, int],
-        item_numerical_dim: int,
-        num_items: int,
-        
+        # User features (with defaults for standalone instantiation)
+        user_categorical_dims: Dict[str, int] = None,
+        user_numerical_dim: int = 10,
+        num_users: int = 50000,
+
+        # Item features (with defaults for standalone instantiation)
+        item_categorical_dims: Dict[str, int] = None,
+        item_numerical_dim: int = 10,
+        num_items: int = 100000,
+
         # Optional parameters (with defaults)
         # Content features
         sentence_bert_model: str = "all-MiniLM-L6-v2",
@@ -310,6 +309,12 @@ class SentenceBERTTwoTowerModel(nn.Module):
             self.user_collab_embedding = nn.Embedding(num_users, embedding_dim // 4)
             self.item_collab_embedding = nn.Embedding(num_items, embedding_dim // 4)
         
+        # Handle None categorical dims with defaults
+        if user_categorical_dims is None:
+            user_categorical_dims = {'user_type': 10, 'age_group': 10}
+        if item_categorical_dims is None:
+            item_categorical_dims = {'genre': 30, 'content_type': 5}
+
         # Categorical embeddings
         self.user_categorical_embeddings = nn.ModuleDict()
         user_cat_dims = []
@@ -317,7 +322,7 @@ class SentenceBERTTwoTowerModel(nn.Module):
             emb_dim = min(64, (vocab_size + 1) // 2)
             self.user_categorical_embeddings[feature_name] = nn.Embedding(vocab_size, emb_dim)
             user_cat_dims.append(emb_dim)
-        
+
         self.item_categorical_embeddings = nn.ModuleDict()
         item_cat_dims = []
         for feature_name, vocab_size in item_categorical_dims.items():
@@ -834,7 +839,11 @@ class SentenceBERTTwoTowerTrainer:
             
             total_loss.backward()
             self.optimizer.step()
-        
+
         self.scheduler.step()
-        
+
         return losses
+
+
+# Alias for backward compatibility with model registry
+SentenceBERTTwoTower = SentenceBERTTwoTowerModel

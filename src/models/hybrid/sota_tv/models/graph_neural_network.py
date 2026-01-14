@@ -58,8 +58,10 @@ class HeteroGraphSAGE(nn.Module):
             for edge_type in edge_types:
                 src_type, rel_type, dst_type = edge_type
                 if use_attention:
+                    # Disable add_self_loops for heterogeneous graphs to prevent edge index issues
                     conv_dict[edge_type] = GATConv(
-                        hidden_dim, hidden_dim // 8, heads=8, dropout=dropout
+                        hidden_dim, hidden_dim // 8, heads=8, dropout=dropout,
+                        add_self_loops=False
                     )
                 else:
                     conv_dict[edge_type] = SAGEConv(

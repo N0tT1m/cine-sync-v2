@@ -13,55 +13,6 @@ from transformers import AutoModel, AutoTokenizer
 import re
 
 
-class T5HybridTrainer:
-    \"\"\"Trainer for T5 Hybrid recommender with comprehensive checkpointing\"\"\"
-    
-    def __init__(self, model, device='cuda', learning_rate=5e-5, weight_decay=1e-5):
-        self.model = model.to(device)
-        self.device = device
-        self.optimizer = torch.optim.AdamW(
-            model.parameters(), 
-            lr=learning_rate, 
-            weight_decay=weight_decay
-        )
-        
-        # Training state
-        self.best_val_loss = float('inf')
-        self.training_history = []
-    
-    def save_checkpoint(self, filepath: str, epoch: int, metrics: Dict[str, float]):
-        \"\"\"Save comprehensive checkpoint with all training state\"\"\"
-        checkpoint = {
-            'epoch': epoch,
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-            'best_val_loss': self.best_val_loss,
-            'metrics': metrics,
-            'training_history': self.training_history,
-            'model_config': {
-                'model_class': self.model.__class__.__name__,
-                'num_users': getattr(self.model, 'num_users', None),
-                'num_items': getattr(self.model, 'num_items', None),
-                'hidden_dim': getattr(self.model, 'hidden_dim', None),
-            }
-        }
-        
-        torch.save(checkpoint, filepath)
-        print(f\"Saved T5Hybrid checkpoint to {filepath}\")
-    
-    def load_checkpoint(self, filepath: str) -> Dict:
-        \"\"\"Load checkpoint and restore training state\"\"\"
-        checkpoint = torch.load(filepath, map_location=self.device)
-        
-        self.model.load_state_dict(checkpoint['model_state_dict'])
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        self.best_val_loss = checkpoint['best_val_loss']
-        self.training_history = checkpoint.get('training_history', [])
-        
-        print(f\"Loaded T5Hybrid checkpoint from {filepath}\")
-        return checkpoint
-
-
 class T5ContentEncoder(nn.Module):
     """T5-based content encoder for movie/TV show descriptions and metadata"""
     
