@@ -43,9 +43,9 @@ class StudioEncoder(nn.Module):
         # Production company embedding
         self.prod_company_embedding = nn.Embedding(config.num_production_companies, config.embedding_dim // 2)
 
-        # Studio characteristics
+        # Studio characteristics (training data provides 16 features)
         self.characteristics_encoder = nn.Sequential(
-            nn.Linear(10, config.embedding_dim // 4),  # avg_budget, avg_rating, genre_diversity, sequel_rate, oscar_rate, etc.
+            nn.Linear(16, config.embedding_dim // 4),  # avg_budget, avg_rating, genre_diversity, sequel_rate, oscar_rate, etc.
             nn.GELU(),
             nn.Linear(config.embedding_dim // 4, config.embedding_dim // 4)
         )
