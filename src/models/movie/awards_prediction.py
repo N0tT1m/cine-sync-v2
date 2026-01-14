@@ -84,16 +84,17 @@ class PrestigeFeatureExtractor(nn.Module):
     def __init__(self, config: AwardsConfig):
         super().__init__()
 
-        # Critic score processor (Metacritic, Rotten Tomatoes)
+        # Critic score processor - accepts single score and expands to embedding
         self.critic_processor = nn.Sequential(
-            nn.Linear(4, config.embedding_dim // 4),  # metacritic, RT_critic, RT_audience, imdb
+            nn.Linear(1, config.embedding_dim // 4),  # single critic score input
             nn.GELU(),
             nn.Linear(config.embedding_dim // 4, config.embedding_dim // 2)
         )
 
-        # Release timing features (awards season timing)
+        # Release timing features - one-hot encoding done internally
+        self.num_months = 12
         self.release_timing = nn.Sequential(
-            nn.Linear(12, config.embedding_dim // 4),  # month of release one-hot
+            nn.Linear(self.num_months, config.embedding_dim // 4),  # month of release one-hot
             nn.GELU(),
             nn.Linear(config.embedding_dim // 4, config.embedding_dim // 4)
         )
@@ -121,8 +122,20 @@ class PrestigeFeatureExtractor(nn.Module):
                 studio_ids: torch.Tensor, distributor_ids: torch.Tensor,
                 budget_range: torch.Tensor) -> torch.Tensor:
         """Extract prestige features"""
+        # Handle critic_scores: ensure shape [batch, 1]
+        if critic_scores.dim() == 1:
+            critic_scores = critic_scores.unsqueeze(-1)
         critic_feat = self.critic_processor(critic_scores)
-        timing_feat = self.release_timing(release_month)
+
+        # Handle release_month: one-hot encode from int to [batch, 12]
+        if release_month.dim() == 1 and release_month.dtype in (torch.int64, torch.int32, torch.long):
+            # Clamp to valid range [0, 11] for one-hot encoding
+            release_month_clamped = release_month.clamp(0, self.num_months - 1)
+            release_month_onehot = F.one_hot(release_month_clamped, num_classes=self.num_months).float()
+        else:
+            release_month_onehot = release_month
+        timing_feat = self.release_timing(release_month_onehot)
+
         studio_feat = self.studio_prestige(studio_ids)
         dist_feat = self.distributor_embedding(distributor_ids)
         budget_feat = self.budget_embedding(budget_range)
