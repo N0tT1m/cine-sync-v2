@@ -416,7 +416,10 @@ class FranchiseSequenceTrainer:
     def evaluate(self, dataloader) -> Dict[str, float]:
         """Evaluate model on validation set"""
         self.model.eval()
-        total_metrics = {'rating_mse': 0, 'next_acc': 0, 'completion_acc': 0}
+        total_metrics = {
+            'rating_mse': 0, 'next_acc': 0, 'completion_acc': 0,
+            'hit@10': 0, 'hit@50': 0, 'hit@100': 0, 'ndcg@10': 0, 'ndcg@50': 0
+        }
         num_batches = 0
 
         with torch.no_grad():
@@ -436,9 +439,31 @@ class FranchiseSequenceTrainer:
                     outputs['rating_pred'].squeeze(), target_ratings
                 ).item()
 
-                # Next movie accuracy
+                # Next movie accuracy (exact match)
                 pred_next = outputs['next_movie_logits'].argmax(dim=-1)
                 total_metrics['next_acc'] += (pred_next == target_next).float().mean().item()
+
+                # Top-K metrics for next movie prediction
+                logits = outputs['next_movie_logits']
+                batch_size = logits.size(0)
+
+                # Hit@K - is the target in top K predictions?
+                for k in [10, 50, 100]:
+                    _, top_k_preds = torch.topk(logits, k, dim=-1)
+                    hits = (top_k_preds == target_next.unsqueeze(1)).any(dim=1).float()
+                    total_metrics[f'hit@{k}'] += hits.mean().item()
+
+                # NDCG@K - normalized discounted cumulative gain
+                for k in [10, 50]:
+                    _, top_k_preds = torch.topk(logits, k, dim=-1)
+                    # Find rank of target in top-k (0 if not present)
+                    match = (top_k_preds == target_next.unsqueeze(1))
+                    ranks = match.float().argmax(dim=1) + 1  # 1-indexed rank
+                    # DCG = 1/log2(rank+1) if hit, else 0
+                    dcg = torch.where(match.any(dim=1), 1.0 / torch.log2(ranks.float() + 1), torch.zeros_like(ranks.float()))
+                    # Ideal DCG = 1/log2(2) = 1 (target at rank 1)
+                    ndcg = dcg  # IDCG is 1 for single relevant item
+                    total_metrics[f'ndcg@{k}'] += ndcg.mean().item()
 
                 # Completion accuracy
                 pred_completion = (outputs['completion_prob'].squeeze() > 0.5).float()
