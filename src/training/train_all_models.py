@@ -1103,19 +1103,41 @@ class UnifiedTrainingPipeline:
 
     def _train_with_trainer(self, model, trainer, epochs, batch_size, save_every, early_stopping_patience):
         """Train using dedicated trainer class"""
-        train_loader, val_loader = self.create_dataloaders(batch_size)
+        # Adjust batch size for GPU memory
+        safe_batch_size = self._get_safe_batch_size(model, batch_size)
+        if safe_batch_size != batch_size:
+            logger.info(f"Adjusted batch size from {batch_size} to {safe_batch_size} for memory safety")
+
+        train_loader, val_loader = self.create_dataloaders(safe_batch_size)
 
         best_val_loss = float('inf')
         patience_counter = 0
         history = {'train_loss': [], 'val_metrics': []}
 
         logger.info(f"Training {self.model_name} ({self.category.value})")
-        logger.info(f"  Epochs: {epochs}, Batch size: {batch_size}, Device: {self.device}")
+        logger.info(f"  Epochs: {epochs}, Batch size: {safe_batch_size}, Device: {self.device}")
+        logger.info(f"  Estimated model memory: {self._estimate_model_memory(model):.2f}GB")
+
+        # Log first batch shapes for debugging
+        first_batch = next(iter(train_loader))
+        logger.info(f"  Batch tensor shapes:")
+        for key, val in first_batch.items():
+            logger.info(f"    {key}: {val.shape} (dtype: {val.dtype})")
 
         for epoch in range(epochs):
             epoch_losses = []
             for batch_idx, batch in enumerate(train_loader):
-                losses = trainer.train_step(batch)
+                try:
+                    losses = trainer.train_step(batch)
+                except RuntimeError as e:
+                    if "size" in str(e) and "match" in str(e):
+                        logger.error(f"Shape mismatch in {self.model_name}!")
+                        logger.error(f"Error: {e}")
+                        logger.error("Batch shapes at failure:")
+                        for key, val in batch.items():
+                            if hasattr(val, 'shape'):
+                                logger.error(f"  {key}: {val.shape}")
+                    raise
                 epoch_losses.append(losses['total_loss'])
 
                 if batch_idx % 100 == 0:

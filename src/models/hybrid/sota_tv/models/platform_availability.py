@@ -51,8 +51,10 @@ class PlatformEncoder(nn.Module):
         self.region_embedding = nn.Embedding(config.num_regions, config.embedding_dim // 4)
 
         # Combine
+        # Input: platform(256) + type(64) + feat(64) + region(64) = 448
+        platform_input_dim = config.embedding_dim + config.embedding_dim // 4 * 3
         self.platform_fusion = nn.Sequential(
-            nn.Linear(config.embedding_dim + config.embedding_dim // 4 * 2, config.hidden_dim),
+            nn.Linear(platform_input_dim, config.hidden_dim),
             nn.GELU(),
             nn.Dropout(config.dropout),
             nn.Linear(config.hidden_dim, config.hidden_dim)

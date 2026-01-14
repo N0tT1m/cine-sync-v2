@@ -56,8 +56,10 @@ class TemporalPatternEncoder(nn.Module):
         )
 
         # Combine
+        # Input: hour(64) + day(64) + month(32) + duration(32) + gap(32) = 224
+        temporal_input_dim = config.embedding_dim // 4 * 2 + config.embedding_dim // 8 * 3
         self.temporal_fusion = nn.Sequential(
-            nn.Linear(config.embedding_dim, config.hidden_dim),
+            nn.Linear(temporal_input_dim, config.hidden_dim),
             nn.GELU(),
             nn.Dropout(config.dropout),
             nn.Linear(config.hidden_dim, config.hidden_dim)

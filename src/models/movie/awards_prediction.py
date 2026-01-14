@@ -108,8 +108,10 @@ class PrestigeFeatureExtractor(nn.Module):
         self.budget_embedding = nn.Embedding(10, config.embedding_dim // 4)
 
         # Combine features
+        # Input: critic(128) + timing(64) + studio(64) + dist(64) + budget(64) = 384
+        feature_input_dim = config.embedding_dim // 2 + config.embedding_dim // 4 * 4
         self.feature_fusion = nn.Sequential(
-            nn.Linear(config.embedding_dim // 2 + config.embedding_dim // 4 * 3, config.hidden_dim),
+            nn.Linear(feature_input_dim, config.hidden_dim),
             nn.GELU(),
             nn.Dropout(config.dropout),
             nn.Linear(config.hidden_dim, config.hidden_dim)
