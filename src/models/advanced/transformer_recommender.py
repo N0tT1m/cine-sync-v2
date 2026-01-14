@@ -505,3 +505,7 @@ class SASRecTrainer:
             'loss': loss.item(),
             'lr': self.optimizer.param_groups[0]['lr']
         }
+
+
+# Alias for compatibility with training script
+TransformerRecommender = SASRec

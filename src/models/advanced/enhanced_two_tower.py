@@ -671,5 +671,9 @@ class TwoTowerTrainer:
             self.optimizer.step()
         
         self.scheduler.step()
-        
+
         return losses
+
+
+# Alias for compatibility with training script
+EnhancedTwoTower = UltimateTwoTowerModel

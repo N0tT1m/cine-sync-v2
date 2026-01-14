@@ -21,8 +21,9 @@ import logging
 import asyncio
 import json
 import re
+import time
 from datetime import datetime
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict, Any
 
 # Add current directory to path for local models (first so it takes precedence)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -33,8 +34,27 @@ from config import load_config
 from models import HybridRecommenderModel, load_model, LupeContentManager
 from unified_content_manager import UnifiedLupeContentManager
 
+# Import personalization modules
+try:
+    from preference_learner import PreferenceLearner
+    from personalized_trainer import PersonalizedTrainer
+    from personalized_commands import (
+        setup_personalization,
+        my_recommendations_command,
+        my_stats_command,
+        rate_movies_command,
+        update_user_embedding_from_feedback
+    )
+    PERSONALIZATION_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"Personalization modules not available: {e}")
+    PERSONALIZATION_AVAILABLE = False
+
 # Load configuration early
 config = load_config()
+
+# Thread-safe cache lock
+_cache_lock = asyncio.Lock()
 
 try:
     from utils.database import DatabaseManager
@@ -252,7 +272,7 @@ class IndividualContentFeedbackView(View):
         return True
     
     async def button_callback(self, interaction: discord.Interaction):
-        custom_id = button.custom_id
+        custom_id = interaction.data['custom_id']
         
         if custom_id.startswith(('love_', 'like_', 'dislike_', 'hate_')):
             feedback_type = custom_id.split('_')[0]
@@ -728,6 +748,17 @@ class LupeRecommendationBot(commands.Bot):
     async def on_ready(self):
         """Called when bot is ready"""
         logger.info(f'{self.user} has connected to Discord!')
+
+        # Initialize personalization if available
+        if PERSONALIZATION_AVAILABLE:
+            try:
+                preference_learner = PreferenceLearner(db_manager)
+                personalized_trainer = PersonalizedTrainer(db_manager, self.lupe)
+                setup_personalization(personalized_trainer, preference_learner, db_manager, self.lupe)
+                logger.info("Personalization system initialized successfully")
+            except Exception as e:
+                logger.error(f"Failed to initialize personalization: {e}")
+
         try:
             synced = await self.tree.sync()
             logger.info(f"Synced {len(synced)} command(s)")
@@ -738,31 +769,41 @@ class LupeRecommendationBot(commands.Bot):
 # Create bot instance
 bot = LupeRecommendationBot()
 
-# Session tracking to prevent repeated recommendations
-user_recommendation_cache = {}
+# Session tracking to prevent repeated recommendations (thread-safe)
+user_recommendation_cache: Dict[str, Dict[str, Any]] = {}
 
-def get_user_excluded_movies(user_id: int) -> set:
-    """Get movies to exclude for this user (recently recommended)"""
+async def get_user_excluded_movies(user_id: int) -> set:
+    """Get movies to exclude for this user (recently recommended) - thread-safe"""
     session_key = f"user_{user_id}_last_recommendations"
-    
-    if session_key in user_recommendation_cache:
-        cache_data = user_recommendation_cache[session_key]
-        # Keep cache for 1 hour
-        import time
-        if time.time() - cache_data['timestamp'] < 3600:
-            return set(cache_data['movie_ids'])
-    
+
+    async with _cache_lock:
+        if session_key in user_recommendation_cache:
+            cache_data = user_recommendation_cache[session_key]
+            # Keep cache for 1 hour
+            if time.time() - cache_data['timestamp'] < 3600:
+                return set(cache_data['movie_ids'])
+
     return set()
 
-def update_user_recommendation_cache(user_id: int, movie_ids: List[int]):
-    """Update the cache with newly recommended movies"""
+async def update_user_recommendation_cache(user_id: int, movie_ids: List[int]):
+    """Update the cache with newly recommended movies - thread-safe"""
     session_key = f"user_{user_id}_last_recommendations"
-    import time
-    
-    user_recommendation_cache[session_key] = {
-        'movie_ids': movie_ids,
-        'timestamp': time.time()
-    }
+
+    async with _cache_lock:
+        user_recommendation_cache[session_key] = {
+            'movie_ids': movie_ids,
+            'timestamp': time.time()
+        }
+
+# Synchronous wrapper for backward compatibility
+def get_user_excluded_movies_sync(user_id: int) -> set:
+    """Synchronous version for backward compatibility"""
+    session_key = f"user_{user_id}_last_recommendations"
+    if session_key in user_recommendation_cache:
+        cache_data = user_recommendation_cache[session_key]
+        if time.time() - cache_data['timestamp'] < 3600:
+            return set(cache_data['movie_ids'])
+    return set()
 
 def is_valid_movie(movie_info):
     """Filter out non-movies, fake movies, and test data"""
@@ -3136,6 +3177,40 @@ async def recommend_advanced_model_autocomplete(interaction: discord.Interaction
 async def recommend_advanced_genre_autocomplete(interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
     """Autocomplete for recommend_advanced genre"""
     return await genre_autocomplete(interaction, current)
+
+
+# Register personalized commands if available
+if PERSONALIZATION_AVAILABLE:
+    @bot.tree.command(name="my_recommendations", description="Get personalized recommendations based on your viewing history")
+    @app_commands.describe(
+        count="Number of recommendations (default: 10)",
+        content_type="Type of content: movie or tv (default: movie)"
+    )
+    async def my_recommendations(
+        interaction: discord.Interaction,
+        count: int = 10,
+        content_type: str = 'movie'
+    ):
+        await my_recommendations_command(interaction, count, content_type)
+
+    @my_recommendations.autocomplete('content_type')
+    async def my_recommendations_content_type_autocomplete(
+        interaction: discord.Interaction, current: str
+    ) -> List[app_commands.Choice[str]]:
+        content_types = ['movie', 'tv']
+        matching = [ct for ct in content_types if current.lower() in ct.lower()]
+        return [app_commands.Choice(name=ct.title(), value=ct) for ct in matching]
+
+    @bot.tree.command(name="my_stats", description="View your preference profile and rating statistics")
+    async def my_stats(interaction: discord.Interaction):
+        await my_stats_command(interaction)
+
+    @bot.tree.command(name="rate_movies", description="Quick rate multiple movies to improve recommendations")
+    @app_commands.describe(count="Number of movies to rate (default: 5, max: 5)")
+    async def rate_movies(interaction: discord.Interaction, count: int = 5):
+        await rate_movies_command(interaction, min(count, 5))
+
+    logger.info("Personalized commands registered: /my_recommendations, /my_stats, /rate_movies")
 
 
 # Run the bot

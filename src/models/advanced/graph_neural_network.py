@@ -5,12 +5,20 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import MessagePassing
-from torch_geometric.utils import add_self_loops, degree
 from typing import Tuple, Dict, Optional, List, Union
 import numpy as np
-import scipy.sparse as sp
-from torch_sparse import SparseTensor
+
+# Optional imports - allow module to load without graph libraries
+try:
+    from torch_geometric.nn import MessagePassing
+    from torch_geometric.utils import add_self_loops, degree
+    import scipy.sparse as sp
+    from torch_sparse import SparseTensor
+    TORCH_GEOMETRIC_AVAILABLE = True
+except ImportError:
+    MessagePassing = nn.Module  # Fallback base class
+    TORCH_GEOMETRIC_AVAILABLE = False
+    SparseTensor = None
 
 
 class LightGCNConv(MessagePassing):
@@ -1151,14 +1159,18 @@ def negative_sampling(positive_edges: torch.Tensor, num_users: int, num_items: i
     positive_set = set(map(tuple, positive_edges.tolist()))
     
     negative_pairs = []
-    
+
     for i in range(num_pos * num_neg_samples):
         while True:
             user_id = torch.randint(0, num_users, (1,)).item()
             item_id = torch.randint(0, num_items, (1,)).item()
-            
+
             if (user_id, item_id) not in positive_set:
                 negative_pairs.append([user_id, item_id])
                 break
-    
+
     return torch.LongTensor(negative_pairs)
+
+
+# Alias for compatibility with training script
+GNNRecommender = LightGCN
