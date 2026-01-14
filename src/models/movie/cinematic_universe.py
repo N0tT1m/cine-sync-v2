@@ -38,7 +38,9 @@ class UniverseGraphAttention(nn.Module):
         self.config = config
 
         # Connection type embeddings (use hidden_dim to match projected input)
-        self.connection_types = nn.Embedding(10, config.hidden_dim)
+        # 11 types: direct_sequel, prequel, spinoff, crossover, post_credits,
+        #           shared_character, same_timeline, alternate_timeline, multiverse, cameo, none
+        self.connection_types = nn.Embedding(11, config.hidden_dim)
         # Types: direct_sequel, prequel, spinoff, crossover, post_credits,
         #        shared_character, same_timeline, alternate_timeline, multiverse, cameo
 
@@ -59,29 +61,29 @@ class UniverseGraphAttention(nn.Module):
                 connection_types: torch.Tensor) -> torch.Tensor:
         """
         Args:
-            movie_features: Movie node features [batch, num_movies, emb_dim]
-            adjacency: Adjacency matrix [batch, num_movies, num_movies]
-            connection_types: Connection type IDs [batch, num_movies, num_movies]
+            movie_features: Movie node features [batch, seq_len, hidden_dim]
+            adjacency: Connection weights per movie [batch, seq_len] (simplified from full matrix)
+            connection_types: Connection type IDs per movie [batch, seq_len]
         """
-        batch_size, num_nodes = movie_features.size(0), movie_features.size(1)
+        batch_size, seq_len = movie_features.size(0), movie_features.size(1)
 
-        # Get connection type embeddings
-        conn_emb = self.connection_types(connection_types)  # [batch, n, n, emb]
-
-        # Create attention mask from adjacency
-        attention_mask = adjacency == 0
+        # Get connection type embeddings [batch, seq_len, hidden_dim]
+        conn_emb = self.connection_types(connection_types)
 
         # Apply attention with connection context
         attended, _ = self.attention(
             movie_features, movie_features, movie_features,
-            key_padding_mask=None, attn_mask=attention_mask[0] if batch_size == 1 else None
+            key_padding_mask=None, attn_mask=None
         )
 
-        # Aggregate edge features
-        edge_features = self.edge_mlp(
-            torch.cat([movie_features.unsqueeze(2).expand(-1, -1, num_nodes, -1),
-                      conn_emb], dim=-1).mean(dim=2)
-        )
+        # Combine movie features with connection embeddings
+        # edge_mlp expects [batch, seq_len, hidden_dim * 2]
+        combined = torch.cat([movie_features, conn_emb], dim=-1)
+        edge_features = self.edge_mlp(combined)
+
+        # Weight by adjacency values (connection strength)
+        adjacency_weights = adjacency.unsqueeze(-1)  # [batch, seq_len, 1]
+        edge_features = edge_features * adjacency_weights
 
         return attended + edge_features
 
@@ -103,7 +105,8 @@ class TimelineEncoder(nn.Module):
         )
 
         # Phase/saga encoding (e.g., MCU phases)
-        self.phase_embedding = nn.Embedding(20, config.embedding_dim)
+        # 21 phases to support indices 0-20
+        self.phase_embedding = nn.Embedding(21, config.embedding_dim)
 
         # Timeline fusion (outputs hidden_dim to match movie_proj output)
         self.timeline_fusion = nn.Sequential(

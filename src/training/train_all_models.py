@@ -1692,6 +1692,7 @@ class UnifiedTrainingPipeline:
             },
             # T5 hybrid
             't5_hybrid': {
+                'num_users': 50000,
                 'num_items': 100000,
                 'embedding_dim': 128,
             },
