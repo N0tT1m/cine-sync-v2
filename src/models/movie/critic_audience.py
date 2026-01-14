@@ -349,7 +349,7 @@ class CriticAudienceTrainer:
         rt_scores = batch['rt_scores'].to(self.device)
         imdb_scores = batch['imdb_scores'].to(self.device)
         letterboxd_scores = batch['letterboxd_scores'].to(self.device)
-        target_scores = batch['user_ratings'].to(self.device)
+        target_scores = batch['ratings'].to(self.device)
 
         outputs = self.model(
             user_ids, movie_ids, metacritic_scores, rt_scores,
@@ -385,7 +385,7 @@ class CriticAudienceTrainer:
                 rt_scores = batch['rt_scores'].to(self.device)
                 imdb_scores = batch['imdb_scores'].to(self.device)
                 letterboxd_scores = batch['letterboxd_scores'].to(self.device)
-                target_scores = batch['user_ratings'].to(self.device)
+                target_scores = batch['ratings'].to(self.device)
 
                 outputs = self.model(
                     user_ids, movie_ids, metacritic_scores, rt_scores,

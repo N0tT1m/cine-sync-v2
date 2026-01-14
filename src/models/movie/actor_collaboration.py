@@ -201,6 +201,16 @@ class ActorCollaborationModel(nn.Module):
         """Encode a movie's full cast"""
         batch_size, cast_size = actor_ids.shape
 
+        # Ensure career_features and genre_distributions have the expected shape
+        # Expected: [batch, cast_size, feature_dim]
+        # If career_features is [batch, 4], broadcast to [batch, cast_size, 4]
+        if career_features.dim() == 2 and career_features.size(1) == 4:
+            career_features = career_features.unsqueeze(1).expand(-1, cast_size, -1)
+
+        # If genre_distributions is [batch, 30], broadcast to [batch, cast_size, 30]
+        if genre_distributions.dim() == 2 and genre_distributions.size(1) == 30:
+            genre_distributions = genre_distributions.unsqueeze(1).expand(-1, cast_size, -1)
+
         # Encode each actor
         actor_reprs = []
         for i in range(cast_size):

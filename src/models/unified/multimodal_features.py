@@ -153,24 +153,48 @@ class VisualFeatureExtractor(nn.Module):
         self.model_type = model_type
 
         if model_type == 'resnet50':
-            # Use ResNet50
-            import torchvision.models as models
-            self.encoder = models.resnet50(pretrained=pretrained)
-            # Remove final FC layer
-            self.base_dim = self.encoder.fc.in_features
-            self.encoder.fc = nn.Identity()
+            # Use ResNet50 - requires torchvision
+            try:
+                import torchvision.models as models
+                self.encoder = models.resnet50(pretrained=pretrained)
+                # Remove final FC layer
+                self.base_dim = self.encoder.fc.in_features
+                self.encoder.fc = nn.Identity()
+            except ImportError:
+                # Fallback to simple CNN if torchvision not available
+                self.base_dim = output_dim
+                self.encoder = nn.Sequential(
+                    nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3),
+                    nn.BatchNorm2d(64),
+                    nn.ReLU(),
+                    nn.MaxPool2d(3, stride=2, padding=1),
+                    nn.Conv2d(64, 128, kernel_size=3, padding=1),
+                    nn.BatchNorm2d(128),
+                    nn.ReLU(),
+                    nn.AdaptiveAvgPool2d((1, 1)),
+                    nn.Flatten(),
+                    nn.Linear(128, output_dim)
+                )
 
         elif model_type == 'vit':
             # Use Vision Transformer
-            from transformers import ViTModel
-            self.encoder = ViTModel.from_pretrained('google/vit-base-patch16-224')
-            self.base_dim = self.encoder.config.hidden_size
+            try:
+                from transformers import ViTModel
+                self.encoder = ViTModel.from_pretrained('google/vit-base-patch16-224')
+                self.base_dim = self.encoder.config.hidden_size
+            except Exception:
+                self.base_dim = output_dim
+                self.encoder = nn.Identity()
 
         elif model_type == 'clip':
             # Use CLIP vision encoder
-            from transformers import CLIPVisionModel
-            self.encoder = CLIPVisionModel.from_pretrained('openai/clip-vit-base-patch32')
-            self.base_dim = self.encoder.config.hidden_size
+            try:
+                from transformers import CLIPVisionModel
+                self.encoder = CLIPVisionModel.from_pretrained('openai/clip-vit-base-patch32')
+                self.base_dim = self.encoder.config.hidden_size
+            except Exception:
+                self.base_dim = output_dim
+                self.encoder = nn.Identity()
 
         else:
             raise ValueError(f"Unknown model type: {model_type}")

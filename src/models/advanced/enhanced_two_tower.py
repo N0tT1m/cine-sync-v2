@@ -217,16 +217,16 @@ class UltimateTwoTowerModel(nn.Module):
     
     def __init__(
         self,
-        # User features
-        user_categorical_dims: Dict[str, int],
-        user_numerical_dim: int,
-        num_users: int,
-        
-        # Item features  
-        item_categorical_dims: Dict[str, int],
-        item_numerical_dim: int,
-        num_items: int,
-        
+        # User features (with defaults for standalone instantiation)
+        user_categorical_dims: Dict[str, int] = None,
+        user_numerical_dim: int = 10,
+        num_users: int = 50000,
+
+        # Item features (with defaults for standalone instantiation)
+        item_categorical_dims: Dict[str, int] = None,
+        item_numerical_dim: int = 10,
+        num_items: int = 100000,
+
         # Model architecture
         embedding_dim: int = 512,
         tower_hidden_dims: List[int] = [1024, 512, 256],
@@ -256,6 +256,12 @@ class UltimateTwoTowerModel(nn.Module):
             self.user_collab_embedding = nn.Embedding(num_users, embedding_dim // 2)
             self.item_collab_embedding = nn.Embedding(num_items, embedding_dim // 2)
         
+        # Handle None categorical dims with defaults
+        if user_categorical_dims is None:
+            user_categorical_dims = {'user_type': 10, 'age_group': 10}
+        if item_categorical_dims is None:
+            item_categorical_dims = {'genre': 30, 'content_type': 5}
+
         # User categorical embeddings
         self.user_categorical_embeddings = nn.ModuleDict()
         user_cat_dims = []
@@ -263,7 +269,7 @@ class UltimateTwoTowerModel(nn.Module):
             emb_dim = min(128, (vocab_size + 1) // 2)
             self.user_categorical_embeddings[feature_name] = nn.Embedding(vocab_size, emb_dim)
             user_cat_dims.append(emb_dim)
-        
+
         # Item categorical embeddings
         self.item_categorical_embeddings = nn.ModuleDict()
         item_cat_dims = []
