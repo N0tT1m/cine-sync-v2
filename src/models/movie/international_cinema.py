@@ -45,7 +45,7 @@ class CountryEncoder(nn.Module):
 
         # Country characteristics
         self.characteristics_encoder = nn.Sequential(
-            nn.Linear(8, config.embedding_dim // 4),  # film_industry_size, avg_production_budget, oscar_wins, festival_wins, cultural_export_score, co_production_rate, subtitled_ratio, dubbing_preference
+            nn.Linear(16, config.embedding_dim // 4),  # film_industry_size, avg_production_budget, oscar_wins, festival_wins, cultural_export_score, co_production_rate, subtitled_ratio, dubbing_preference, + 8 more features
             nn.GELU(),
             nn.Linear(config.embedding_dim // 4, config.embedding_dim // 4)
         )

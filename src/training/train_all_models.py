@@ -265,7 +265,7 @@ TV_SPECIFIC_MODELS = {
         'trainer_class': None,
         'config_class': None,
         'description': 'Ensemble of TV models',
-        'priority': 5
+        'priority': 3  # Lower priority so it trains AFTER sub-models (tv_multimodal, tv_graph_neural, tv_contrastive have priority 4)
     },
     'tv_multimodal': {
         'module': 'src.models.hybrid.sota_tv.models.multimodal_transformer',
