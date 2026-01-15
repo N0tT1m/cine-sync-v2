@@ -77,7 +77,7 @@ class CulturalStyleEncoder(nn.Module):
         super().__init__()
 
         # Narrative style embedding
-        self.narrative_style = nn.Embedding(10, config.embedding_dim // 4)
+        self.narrative_style = nn.Embedding(20, config.embedding_dim // 4)
         # Styles: Hollywood_classic, European_arthouse, Asian_melodrama, Latin_magical_realism, etc.
 
         # Pacing preference (fast/slow)
@@ -91,7 +91,7 @@ class CulturalStyleEncoder(nn.Module):
         self.genre_dist_encoder = nn.Linear(30, config.embedding_dim // 4)
 
         # Visual style embedding
-        self.visual_style = nn.Embedding(15, config.embedding_dim // 4)
+        self.visual_style = nn.Embedding(50, config.embedding_dim // 4)
         # Styles: Hollywood_polished, European_naturalistic, Asian_stylized, etc.
 
         # Combine
