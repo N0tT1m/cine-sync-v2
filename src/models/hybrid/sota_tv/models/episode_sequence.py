@@ -150,8 +150,9 @@ class EpisodeSequenceModel(nn.Module):
         )
 
         # Episode rating predictor
+        # Input: user_emb (hidden_dim) + show_repr (embedding_dim) + seq_pooled (hidden_dim)
         self.rating_head = nn.Sequential(
-            nn.Linear(self.config.hidden_dim * 3, self.config.hidden_dim),
+            nn.Linear(self.config.hidden_dim * 2 + self.config.embedding_dim, self.config.hidden_dim),
             nn.GELU(),
             nn.Dropout(self.config.dropout),
             nn.Linear(self.config.hidden_dim, 1)
