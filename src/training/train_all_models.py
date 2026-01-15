@@ -850,6 +850,8 @@ class UnifiedDataset(Dataset):
                     sample[key] = self._get_int_seq_field(key, item, user_seq, spec)
                 elif spec['type'] == 'float_seq':
                     sample[key] = self._get_float_seq_field(key, item, user_seq, spec)
+                elif spec['type'] == 'float_seq_2d':
+                    sample[key] = self._get_float_seq_2d_field(key, item, user_seq, spec)
                 elif spec['type'] == 'bool':
                     sample[key] = self._get_bool_field(key, item, spec, user_seq, item_idx)
 
@@ -1069,6 +1071,40 @@ class UnifiedDataset(Dataset):
         seed = item.get('item_id', 0) + item.get('user_id', 0)
         np.random.seed(seed % (2**31))
         return np.random.uniform(min_val, max_val, size=seq_len).astype(np.float32)
+
+    def _get_float_seq_2d_field(self, key: str, item: Dict, user_seq: List[Dict], spec: Dict) -> np.ndarray:
+        """Get 2D float sequence field (seq_len x feature_dim) from raw data"""
+        seq_len = spec.get('seq_len', 10)
+        feature_dim = spec.get('feature_dim', 8)
+
+        # EPISODE FEATURES: Generate realistic episode-level features
+        # Features: rating, duration, viewership, importance, cliffhanger_score, pacing, dialogue_density, action_density
+        if key == 'episode_features':
+            rating = item.get('rating', 3.0) / 5.0  # Normalized rating
+            seed = item.get('item_id', 0) + item.get('user_id', 0)
+            np.random.seed(seed % (2**31))
+
+            features = np.zeros((seq_len, feature_dim), dtype=np.float32)
+            for i in range(seq_len):
+                # Create varied but consistent features per episode position
+                episode_seed = seed + i
+                np.random.seed(episode_seed % (2**31))
+
+                features[i, 0] = rating + np.random.uniform(-0.1, 0.1)  # episode rating
+                features[i, 1] = np.random.uniform(0.3, 1.0)  # duration (normalized)
+                features[i, 2] = np.random.uniform(0.1, 0.9)  # viewership
+                features[i, 3] = 0.5 + 0.3 * (i == 0 or i == seq_len - 1)  # importance (premiere/finale higher)
+                features[i, 4] = np.random.uniform(0.0, 0.8)  # cliffhanger_score
+                features[i, 5] = np.random.uniform(0.3, 0.8)  # pacing
+                features[i, 6] = np.random.uniform(0.2, 0.7)  # dialogue_density
+                features[i, 7] = np.random.uniform(0.1, 0.6)  # action_density
+
+            return features
+
+        # Default: random 2D features
+        seed = item.get('item_id', 0) + item.get('user_id', 0)
+        np.random.seed(seed % (2**31))
+        return np.random.uniform(0, 1, size=(seq_len, feature_dim)).astype(np.float32)
 
     def _get_bool_field(self, key: str, item: Dict, spec: Dict,
                          user_seq: List[Dict] = None, item_idx: int = -1) -> float:
@@ -1331,7 +1367,7 @@ class UnifiedDataset(Dataset):
                 'episode_positions': {'type': 'int_seq', 'max': 500, 'seq_len': 20},
                 'season_ids': {'type': 'int_seq', 'max': 30, 'seq_len': 20},
                 'episode_types': {'type': 'int_seq', 'max': 10, 'seq_len': 20},
-                'episode_features': {'type': 'float_seq', 'seq_len': 20},
+                'episode_features': {'type': 'float_seq_2d', 'seq_len': 20, 'feature_dim': 8},
                 'ratings': {'type': 'float', 'min': 1, 'max': 5},
             },
             'tv_binge_prediction': {
