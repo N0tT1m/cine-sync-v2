@@ -1601,6 +1601,9 @@ class UnifiedTrainingPipeline:
 
             # Check if model requires pre-built sub-models (marked as skip)
             if default_args.get('_skip', False):
+                # Special handling for tv_ensemble - try to load sub-models
+                if self.model_name == 'tv_ensemble':
+                    return self._create_ensemble_from_checkpoints(model_class)
                 raise ValueError(
                     f"Model {self.model_name} requires pre-built sub-models and cannot be "
                     f"instantiated directly. Please use the ensemble system to combine models."
@@ -1622,6 +1625,87 @@ class UnifiedTrainingPipeline:
         param_count = sum(p.numel() for p in model.parameters())
         logger.info(f"Created {self.model_name} with {param_count:,} parameters")
         return model
+
+    def _create_ensemble_from_checkpoints(self, ensemble_class) -> nn.Module:
+        """Create tv_ensemble by loading pre-trained sub-models from checkpoints"""
+        import importlib
+
+        # Define sub-model mappings: (checkpoint_name, module_path, class_name, default_args)
+        sub_model_specs = {
+            'multimodal': (
+                'tv_multimodal',
+                'src.models.hybrid.sota_tv.models.multimodal_transformer',
+                'MultimodalTransformerTV',
+                {'vocab_sizes': {'shows': 50000, 'genres': 50, 'networks': 100}, 'num_shows': 50000}
+            ),
+            'gnn': (
+                'tv_graph_neural',
+                'src.models.hybrid.sota_tv.models.graph_neural_network',
+                'TVGraphRecommender',
+                {'num_shows': 50000, 'num_actors': 100000, 'num_genres': 50, 'num_networks': 100, 'num_creators': 20000}
+            ),
+            'contrastive': (
+                'tv_contrastive',
+                'src.models.hybrid.sota_tv.models.contrastive_learning',
+                'ContrastiveTVModel',
+                {'vocab_sizes': {'shows': 50000, 'genres': 50, 'networks': 100}, 'embed_dim': 768}
+            ),
+        }
+
+        loaded_models = {}
+        missing_models = []
+
+        for model_key, (checkpoint_name, module_path, class_name, default_args) in sub_model_specs.items():
+            # Check for checkpoint
+            checkpoint_dir = self.output_dir / 'tv' / checkpoint_name
+            checkpoint_path = checkpoint_dir / 'checkpoint_best.pt'
+            if not checkpoint_path.exists():
+                checkpoint_path = checkpoint_dir / 'checkpoint_final.pt'
+
+            if not checkpoint_path.exists():
+                missing_models.append(checkpoint_name)
+                continue
+
+            try:
+                # Load model class
+                module = importlib.import_module(module_path)
+                model_class = getattr(module, class_name)
+
+                # Instantiate model
+                model = model_class(**default_args)
+
+                # Load checkpoint
+                checkpoint = torch.load(checkpoint_path, map_location=self.device)
+                model.load_state_dict(checkpoint['model_state_dict'])
+                model.eval()  # Set to eval mode for ensemble
+
+                loaded_models[model_key] = model
+                logger.info(f"Loaded pre-trained {checkpoint_name} from {checkpoint_path}")
+
+            except Exception as e:
+                logger.error(f"Failed to load {checkpoint_name}: {e}")
+                missing_models.append(checkpoint_name)
+
+        if missing_models:
+            raise ValueError(
+                f"Cannot create tv_ensemble - missing pre-trained sub-models: {missing_models}. "
+                f"Please train these models first: {', '.join(missing_models)}"
+            )
+
+        # Create ensemble with loaded sub-models
+        ensemble = ensemble_class(
+            multimodal_model=loaded_models['multimodal'],
+            gnn_model=loaded_models['gnn'],
+            contrastive_model=loaded_models['contrastive'],
+            embed_dim=768,
+            use_adaptive_weighting=True,
+            use_uncertainty_estimation=True,
+            fusion_strategy='attention'
+        )
+
+        param_count = sum(p.numel() for p in ensemble.parameters())
+        logger.info(f"Created tv_ensemble with {param_count:,} parameters (loaded sub-models from checkpoints)")
+        return ensemble
 
     def _get_default_model_args(self) -> Dict[str, Any]:
         """Get default arguments for models without config classes"""
@@ -1769,6 +1853,8 @@ class UnifiedTrainingPipeline:
 
     def create_dataloaders(self, batch_size: int = 256, num_workers: int = 4) -> tuple:
         """Create train and validation dataloaders"""
+        import platform
+
         # Determine content type based on category
         if self.category == ModelCategory.MOVIE_SPECIFIC:
             content_type = 'movie'
@@ -1780,8 +1866,20 @@ class UnifiedTrainingPipeline:
         train_dataset = UnifiedDataset(self.data_dir, content_type, self.model_name, 'train')
         val_dataset = UnifiedDataset(self.data_dir, content_type, self.model_name, 'val')
 
+        # Adjust num_workers based on dataset size and platform
+        # Windows spawn method is memory-heavy - each worker copies dataset
+        dataset_size = len(train_dataset)
+        if platform.system() == 'Windows':
+            if dataset_size > 1_000_000:
+                # Very large dataset - disable multiprocessing to avoid MemoryError
+                num_workers = 0
+                logger.info(f"Large dataset ({dataset_size:,} samples) on Windows - using num_workers=0")
+            elif dataset_size > 500_000:
+                num_workers = min(num_workers, 2)
+                logger.info(f"Medium dataset ({dataset_size:,} samples) on Windows - reduced to num_workers={num_workers}")
+
         # Only use pin_memory when CUDA is available
-        use_pin_memory = torch.cuda.is_available()
+        use_pin_memory = torch.cuda.is_available() and num_workers > 0
 
         train_loader = DataLoader(
             train_dataset, batch_size=batch_size, shuffle=True,

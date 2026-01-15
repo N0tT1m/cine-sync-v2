@@ -104,7 +104,9 @@ class EpisodeSequenceTransformer(nn.Module):
         x = episode_repr + self.pos_encoding[:seq_len].unsqueeze(0)
 
         if mask is not None:
-            transformed = self.transformer(x, src_key_padding_mask=~mask)
+            # Use logical_not() instead of ~ to avoid "Boolean value of Tensor with more than one value" warning
+            padding_mask = mask.bool().logical_not()
+            transformed = self.transformer(x, src_key_padding_mask=padding_mask)
         else:
             transformed = self.transformer(x)
 
