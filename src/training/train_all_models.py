@@ -1976,6 +1976,11 @@ class UnifiedTrainingPipeline:
         patience_counter = 0
         history = {'train_loss': [], 'val_metrics': []}
 
+        # Learning validation tracking
+        initial_loss = None
+        no_improvement_count = 0
+        learning_validated = False
+
         logger.info(f"Training {self.model_name} ({self.category.value})")
         logger.info(f"  Epochs: {epochs}, Batch size: {safe_batch_size}, Device: {self.device}")
         logger.info(f"  Estimated model memory: {self._estimate_model_memory(model):.2f}GB")
@@ -1984,7 +1989,8 @@ class UnifiedTrainingPipeline:
         first_batch = next(iter(train_loader))
         logger.info(f"  Batch tensor shapes:")
         for key, val in first_batch.items():
-            logger.info(f"    {key}: {val.shape} (dtype: {val.dtype})")
+            if hasattr(val, 'shape'):
+                logger.info(f"    {key}: {val.shape} (dtype: {val.dtype})")
 
         for epoch in range(epochs):
             epoch_losses = []
@@ -2009,10 +2015,51 @@ class UnifiedTrainingPipeline:
             avg_train_loss = np.mean(epoch_losses)
             history['train_loss'].append(avg_train_loss)
 
+            # Track initial loss
+            if initial_loss is None:
+                initial_loss = avg_train_loss
+
             val_metrics = trainer.evaluate(val_loader)
             history['val_metrics'].append(val_metrics)
 
-            logger.info(f"Epoch {epoch+1}/{epochs} - Train: {avg_train_loss:.4f}, Val: {val_metrics}")
+            # Get current learning rate
+            current_lr = trainer.scheduler.get_last_lr()[0] if hasattr(trainer.scheduler, 'get_last_lr') else 0
+
+            # === LEARNING VALIDATION CHECKS ===
+
+            # Check 1: Learning rate is effectively zero
+            if current_lr < 1e-10:
+                logger.error(f"⚠️  LEARNING RATE IS ZERO ({current_lr:.2e}) - Model is NOT learning!")
+
+            # Check 2: Loss not decreasing after initial epochs
+            if epoch >= 3:
+                recent_losses = history['train_loss'][-3:]
+                loss_variance = max(recent_losses) - min(recent_losses)
+                loss_improvement = initial_loss - avg_train_loss
+
+                if loss_variance < 1e-6 and abs(loss_improvement) < 1e-4:
+                    no_improvement_count += 1
+                    if no_improvement_count >= 3:
+                        logger.error(f"⚠️  NO LEARNING DETECTED after {epoch+1} epochs!")
+                        logger.error(f"    Initial loss: {initial_loss:.6f}, Current loss: {avg_train_loss:.6f}")
+                        logger.error(f"    Loss improvement: {loss_improvement:.6f}, Variance: {loss_variance:.6f}")
+                else:
+                    no_improvement_count = 0
+                    if not learning_validated and loss_improvement > 0.01:
+                        learning_validated = True
+                        logger.info(f"✓ Learning validated: Loss decreased from {initial_loss:.4f} to {avg_train_loss:.4f}")
+
+            # Check 3: Loss is NaN or Inf
+            if not np.isfinite(avg_train_loss):
+                logger.error(f"⚠️  Loss is {avg_train_loss} - Training has diverged!")
+                return {
+                    'model_name': self.model_name,
+                    'epochs_trained': epoch + 1,
+                    'status': 'failed',
+                    'reason': 'loss_diverged'
+                }
+
+            logger.info(f"Epoch {epoch+1}/{epochs} - Train: {avg_train_loss:.4f} | LR: {current_lr:.2e} | Val: {val_metrics}")
 
             if self.use_wandb:
                 wandb.log({'epoch': epoch + 1, 'train_loss': avg_train_loss,
@@ -2034,13 +2081,38 @@ class UnifiedTrainingPipeline:
 
             trainer.scheduler.step()
 
-        self._save_checkpoint(model, 'final', val_metrics)
+        # Final learning validation summary
+        final_loss = history['train_loss'][-1] if history['train_loss'] else 0
+        total_improvement = initial_loss - final_loss if initial_loss else 0
+        improvement_pct = (total_improvement / initial_loss * 100) if initial_loss and initial_loss > 0 else 0
+
+        if improvement_pct < 1.0:
+            logger.warning(f"⚠️  MINIMAL LEARNING: Loss only improved {improvement_pct:.1f}% over {epoch+1} epochs")
+            logger.warning(f"    Initial: {initial_loss:.4f} → Final: {final_loss:.4f}")
+        else:
+            logger.info(f"✓ Training complete: Loss improved {improvement_pct:.1f}% ({initial_loss:.4f} → {final_loss:.4f})")
+
+        self._save_checkpoint(model, 'final', {
+            **val_metrics,
+            'final_loss': final_loss,
+            'initial_loss': initial_loss,
+            'improvement_pct': improvement_pct,
+            'learning_validated': learning_validated
+        })
 
         if self.use_wandb:
             wandb.finish()
 
-        return {'model_name': self.model_name, 'best_val_loss': best_val_loss,
-                'history': history, 'epochs_trained': epoch + 1}
+        return {
+            'model_name': self.model_name,
+            'best_val_loss': best_val_loss,
+            'history': history,
+            'epochs_trained': epoch + 1,
+            'initial_loss': initial_loss,
+            'final_loss': final_loss,
+            'improvement_pct': improvement_pct,
+            'learning_validated': learning_validated
+        }
 
     def _estimate_model_memory(self, model: nn.Module) -> float:
         """Estimate model memory usage in GB"""
@@ -2095,12 +2167,21 @@ class UnifiedTrainingPipeline:
 
         logger.info(f"Training {self.model_name} with generic trainer")
         logger.info(f"  Estimated model memory: {self._estimate_model_memory(model):.2f}GB")
+        logger.info(f"  Initial learning rate: {lr}")
+
+        # Learning validation tracking
+        loss_history = []
+        initial_loss = None
+        no_improvement_count = 0
+        learning_validated = False
 
         best_val_loss = float('inf')
         for epoch in range(epochs):
             model.train()
             epoch_loss = 0
             batch_count = 0
+            total_grad_norm = 0
+
             for batch in train_loader:
                 optimizer.zero_grad()
                 # Generic forward - try multiple input patterns
@@ -2137,6 +2218,15 @@ class UnifiedTrainingPipeline:
 
                     loss = criterion(pred.squeeze(), ratings.float())
                     loss.backward()
+
+                    # Track gradient norm for learning validation
+                    grad_norm = 0
+                    for p in model.parameters():
+                        if p.grad is not None:
+                            grad_norm += p.grad.data.norm(2).item() ** 2
+                    grad_norm = grad_norm ** 0.5
+                    total_grad_norm += grad_norm
+
                     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                     optimizer.step()
                     epoch_loss += loss.item()
@@ -2154,13 +2244,85 @@ class UnifiedTrainingPipeline:
 
             scheduler.step()
 
+            # Calculate metrics
+            avg_loss = epoch_loss / max(batch_count, 1)
+            avg_grad_norm = total_grad_norm / max(batch_count, 1)
+            current_lr = scheduler.get_last_lr()[0]
+
+            # Track loss history
+            loss_history.append(avg_loss)
+            if initial_loss is None:
+                initial_loss = avg_loss
+
+            # === LEARNING VALIDATION CHECKS ===
+
+            # Check 1: Learning rate is effectively zero
+            if current_lr < 1e-10:
+                logger.error(f"⚠️  LEARNING RATE IS ZERO ({current_lr:.2e}) - Model is NOT learning!")
+
+            # Check 2: Gradients are near zero (model not learning)
+            if avg_grad_norm < 1e-8:
+                logger.warning(f"⚠️  Gradient norm is near zero ({avg_grad_norm:.2e}) - Model may not be learning!")
+
+            # Check 3: Loss not decreasing after initial epochs
+            if epoch >= 3:
+                recent_losses = loss_history[-3:]
+                loss_variance = max(recent_losses) - min(recent_losses)
+                loss_improvement = initial_loss - avg_loss
+
+                if loss_variance < 1e-6 and abs(loss_improvement) < 1e-4:
+                    no_improvement_count += 1
+                    if no_improvement_count >= 3:
+                        logger.error(f"⚠️  NO LEARNING DETECTED after {epoch+1} epochs!")
+                        logger.error(f"    Initial loss: {initial_loss:.6f}, Current loss: {avg_loss:.6f}")
+                        logger.error(f"    Loss improvement: {loss_improvement:.6f}, Variance: {loss_variance:.6f}")
+                        logger.error(f"    This model may have issues with data or architecture.")
+                else:
+                    no_improvement_count = 0
+                    if not learning_validated and loss_improvement > 0.01:
+                        learning_validated = True
+                        logger.info(f"✓ Learning validated: Loss decreased from {initial_loss:.4f} to {avg_loss:.4f}")
+
+            # Check 4: Loss is NaN or Inf
+            if not np.isfinite(avg_loss):
+                logger.error(f"⚠️  Loss is {avg_loss} - Training has diverged!")
+                return {
+                    'model_name': self.model_name,
+                    'epochs_trained': epoch + 1,
+                    'status': 'failed',
+                    'reason': 'loss_diverged'
+                }
+
             if (epoch + 1) % save_every == 0:
                 self._save_checkpoint(model, epoch + 1, {'loss': epoch_loss})
 
-            logger.info(f"Epoch {epoch+1}/{epochs} - Loss: {epoch_loss/len(train_loader):.4f}")
+            logger.info(f"Epoch {epoch+1}/{epochs} - Loss: {avg_loss:.4f} | LR: {current_lr:.2e} | GradNorm: {avg_grad_norm:.2e}")
 
-        self._save_checkpoint(model, 'final', {})
-        return {'model_name': self.model_name, 'epochs_trained': epochs}
+        # Final learning validation summary
+        total_improvement = initial_loss - loss_history[-1] if loss_history else 0
+        improvement_pct = (total_improvement / initial_loss * 100) if initial_loss and initial_loss > 0 else 0
+
+        if improvement_pct < 1.0:
+            logger.warning(f"⚠️  MINIMAL LEARNING: Loss only improved {improvement_pct:.1f}% over {epochs} epochs")
+            logger.warning(f"    Initial: {initial_loss:.4f} → Final: {loss_history[-1]:.4f}")
+        else:
+            logger.info(f"✓ Training complete: Loss improved {improvement_pct:.1f}% ({initial_loss:.4f} → {loss_history[-1]:.4f})")
+
+        self._save_checkpoint(model, 'final', {
+            'final_loss': loss_history[-1] if loss_history else 0,
+            'initial_loss': initial_loss,
+            'improvement_pct': improvement_pct,
+            'learning_validated': learning_validated
+        })
+
+        return {
+            'model_name': self.model_name,
+            'epochs_trained': epochs,
+            'initial_loss': initial_loss,
+            'final_loss': loss_history[-1] if loss_history else 0,
+            'improvement_pct': improvement_pct,
+            'learning_validated': learning_validated
+        }
 
     def _save_checkpoint(self, model: nn.Module, identifier: Any, metrics: Dict):
         """Save model checkpoint"""
