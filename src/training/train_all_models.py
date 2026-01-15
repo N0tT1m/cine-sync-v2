@@ -1599,14 +1599,23 @@ class UnifiedTrainingPipeline:
             # Provide default arguments for models without config classes
             default_args = self._get_default_model_args()
 
-            # Check if model requires pre-built sub-models (marked as skip)
+            # Check if model requires pre-built sub-models or dedicated training (marked as skip)
             if default_args.get('_skip', False):
                 # Special handling for tv_ensemble - try to load sub-models
                 if self.model_name == 'tv_ensemble':
                     return self._create_ensemble_from_checkpoints(model_class)
+
+                # Models with specialized input requirements
+                dedicated_scripts = {
+                    'tv_graph_neural': 'src/models/hybrid/sota_tv/training/train_gnn.py',
+                    'tv_contrastive': 'src/models/hybrid/sota_tv/training/train_contrastive.py',
+                    'unified_contrastive': 'requires base_model parameter',
+                    'context_aware': 'requires base_recommender parameter',
+                }
+                script_info = dedicated_scripts.get(self.model_name, 'dedicated training script')
                 raise ValueError(
-                    f"Model {self.model_name} requires pre-built sub-models and cannot be "
-                    f"instantiated directly. Please use the ensemble system to combine models."
+                    f"Model {self.model_name} cannot use generic training due to specialized input requirements. "
+                    f"Use: {script_info}"
                 )
 
             # Remove internal flags before passing to constructor
@@ -1792,6 +1801,9 @@ class UnifiedTrainingPipeline:
                 'd_model': 512,
             },
             'tv_graph_neural': {
+                # GNN model requires graph-structured input (x_dict, edge_index_dict)
+                # Use dedicated training script: train_gnn.py
+                '_skip': True,
                 'num_shows': 50000,
                 'num_actors': 100000,
                 'num_genres': 50,
@@ -1799,6 +1811,9 @@ class UnifiedTrainingPipeline:
                 'num_creators': 20000,
             },
             'tv_contrastive': {
+                # Contrastive model requires triplet input (anchor, positive, negative)
+                # Use dedicated training script: train_contrastive.py
+                '_skip': True,
                 'vocab_sizes': {'shows': 50000, 'genres': 50, 'networks': 100},
                 'embed_dim': 768,
             },
