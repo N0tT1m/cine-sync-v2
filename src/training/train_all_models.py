@@ -18,6 +18,7 @@ Supports:
 
 import argparse
 import logging
+import math
 import os
 import platform
 import sys
@@ -2695,13 +2696,21 @@ class UnifiedTrainingPipeline:
 
                         # Unscale for gradient clipping
                         scaler.unscale_(optimizer)
+
+                        # Replace NaN/Inf gradients with zeros before clipping
+                        for p in model.parameters():
+                            if p.grad is not None:
+                                p.grad = torch.nan_to_num(p.grad, nan=0.0, posinf=1.0, neginf=-1.0)
+
                         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 
                         # Track gradient norm for learning validation
-                        grad_norm = 0
+                        grad_norm = 0.0
                         for p in model.parameters():
                             if p.grad is not None:
-                                grad_norm += p.grad.data.norm(2).item() ** 2
+                                param_norm = p.grad.data.norm(2).item()
+                                if not (math.isnan(param_norm) or math.isinf(param_norm)):
+                                    grad_norm += param_norm ** 2
                         grad_norm = grad_norm ** 0.5
                         total_grad_norm += grad_norm
 
@@ -2712,11 +2721,18 @@ class UnifiedTrainingPipeline:
                         loss, pred = self._model_forward(model, batch, criterion)
                         loss.backward()
 
-                        # Track gradient norm for learning validation
-                        grad_norm = 0
+                        # Replace NaN/Inf gradients with zeros before clipping
                         for p in model.parameters():
                             if p.grad is not None:
-                                grad_norm += p.grad.data.norm(2).item() ** 2
+                                p.grad = torch.nan_to_num(p.grad, nan=0.0, posinf=1.0, neginf=-1.0)
+
+                        # Track gradient norm for learning validation
+                        grad_norm = 0.0
+                        for p in model.parameters():
+                            if p.grad is not None:
+                                param_norm = p.grad.data.norm(2).item()
+                                if not (math.isnan(param_norm) or math.isinf(param_norm)):
+                                    grad_norm += param_norm ** 2
                         grad_norm = grad_norm ** 0.5
                         total_grad_norm += grad_norm
 

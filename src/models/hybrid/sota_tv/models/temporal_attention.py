@@ -90,9 +90,11 @@ class TemporalAttentionLayer(nn.Module):
         self.w_v = nn.Linear(d_model, d_model, bias=False)
         self.w_o = nn.Linear(d_model, d_model)
         
-        # Relative positional encodings
-        self.relative_position_k = nn.Parameter(torch.randn(max_relative_position * 2 + 1, self.d_k))
-        self.relative_position_v = nn.Parameter(torch.randn(max_relative_position * 2 + 1, self.d_k))
+        # Relative positional encodings (Xavier initialization for stability)
+        self.relative_position_k = nn.Parameter(torch.zeros(max_relative_position * 2 + 1, self.d_k))
+        self.relative_position_v = nn.Parameter(torch.zeros(max_relative_position * 2 + 1, self.d_k))
+        nn.init.xavier_uniform_(self.relative_position_k)
+        nn.init.xavier_uniform_(self.relative_position_v)
         
         self.dropout = nn.Dropout(dropout)
         self.layer_norm = nn.LayerNorm(d_model)
@@ -129,9 +131,13 @@ class TemporalAttentionLayer(nn.Module):
         attention_scores += rel_scores
         
         if mask is not None:
-            attention_scores.masked_fill_(mask == 0, -1e9)
-        
+            attention_scores = attention_scores.masked_fill(mask == 0, -1e4)  # Use -1e4 instead of -1e9 for fp16 stability
+
+        # Stable softmax: subtract max for numerical stability
+        attention_scores = attention_scores - attention_scores.max(dim=-1, keepdim=True)[0].detach()
         attention_weights = F.softmax(attention_scores, dim=-1)
+        # Replace any NaN with zeros (can happen if entire row is masked)
+        attention_weights = torch.nan_to_num(attention_weights, nan=0.0)
         attention_weights = self.dropout(attention_weights)
         
         # Apply attention to values
