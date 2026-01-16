@@ -343,65 +343,80 @@ class TemporalAttentionTVModel(nn.Module):
         )
         
     def create_temporal_features(self, timestamps: torch.Tensor) -> torch.Tensor:
-        """Create rich temporal features from timestamps"""
-        batch_size, seq_len = timestamps.shape
-        features = []
-        
-        # Convert timestamps to datetime features
-        # Assuming timestamps are in Unix time format
-        for i in range(batch_size):
-            batch_features = []
-            for j in range(seq_len):
-                timestamp = timestamps[i, j].item()
-                if timestamp > 0:  # Valid timestamp
-                    dt = datetime.fromtimestamp(timestamp)
-                    
-                    # Cyclical time features
-                    hour_sin = math.sin(2 * math.pi * dt.hour / 24)
-                    hour_cos = math.cos(2 * math.pi * dt.hour / 24)
-                    day_sin = math.sin(2 * math.pi * dt.weekday() / 7)
-                    day_cos = math.cos(2 * math.pi * dt.weekday() / 7)
-                    month_sin = math.sin(2 * math.pi * dt.month / 12)
-                    month_cos = math.cos(2 * math.pi * dt.month / 12)
-                    
-                    # Linear time features
-                    year_norm = (dt.year - 2000) / 25  # Normalized year
-                    day_of_year = dt.timetuple().tm_yday / 366
-                    
-                    # Season indicators
-                    is_winter = 1.0 if dt.month in [12, 1, 2] else 0.0
-                    is_spring = 1.0 if dt.month in [3, 4, 5] else 0.0
-                    is_summer = 1.0 if dt.month in [6, 7, 8] else 0.0
-                    is_fall = 1.0 if dt.month in [9, 10, 11] else 0.0
-                    
-                    # Weekend indicator
-                    is_weekend = 1.0 if dt.weekday() >= 5 else 0.0
-                    
-                    # Holiday proximity (simplified)
-                    # This could be enhanced with actual holiday data
-                    holiday_proximity = 0.0
-                    
-                    # TV season indicators (US TV seasons)
-                    is_tv_season = 1.0 if dt.month in [9, 10, 11, 12, 1, 2, 3, 4] else 0.0
-                    is_summer_break = 1.0 if dt.month in [6, 7, 8] else 0.0
-                    
-                    # Prime time indicator
-                    is_prime_time = 1.0 if 19 <= dt.hour <= 22 else 0.0
-                    
-                    # Create feature vector
-                    feature_vector = [
-                        hour_sin, hour_cos, day_sin, day_cos, month_sin, month_cos,
-                        year_norm, day_of_year, is_winter, is_spring, is_summer, is_fall,
-                        is_weekend, holiday_proximity, is_tv_season, is_summer_break,
-                        is_prime_time, 0.0, 0.0, 0.0  # Padding to 20 features
-                    ]
-                else:
-                    feature_vector = [0.0] * 20  # Padding for invalid timestamps
-                
-                batch_features.append(feature_vector)
-            features.append(batch_features)
-        
-        return torch.tensor(features, dtype=torch.float, device=timestamps.device)
+        """Create rich temporal features from timestamps (vectorized)"""
+        # timestamps shape: (batch_size, seq_len)
+        # Ensure float for calculations
+        ts = timestamps.float()
+
+        # Handle invalid timestamps (zeros or negatives)
+        valid_mask = ts > 0
+        # Use a default timestamp for invalid entries to avoid NaN
+        ts = torch.where(valid_mask, ts, torch.ones_like(ts) * 1609459200.0)  # 2021-01-01
+
+        # Extract time components using vectorized operations
+        # Seconds since midnight
+        seconds_in_day = ts % 86400
+        hours = seconds_in_day / 3600
+
+        # Days since epoch (approximate)
+        days_since_epoch = ts / 86400
+
+        # Day of week (0=Thursday for Unix epoch, so adjust)
+        day_of_week = (days_since_epoch + 4) % 7  # 0=Monday
+
+        # Approximate month and day of year
+        # Days in a year approximately
+        days_in_year = days_since_epoch % 365.25
+        month_approx = (days_in_year / 30.44) % 12  # Approximate month (0-11)
+        day_of_year_norm = days_in_year / 366
+
+        # Year (approximate)
+        year_approx = 1970 + days_since_epoch / 365.25
+        year_norm = (year_approx - 2000) / 25
+
+        # Cyclical time features
+        two_pi = 2 * math.pi
+        hour_sin = torch.sin(two_pi * hours / 24)
+        hour_cos = torch.cos(two_pi * hours / 24)
+        day_sin = torch.sin(two_pi * day_of_week / 7)
+        day_cos = torch.cos(two_pi * day_of_week / 7)
+        month_sin = torch.sin(two_pi * month_approx / 12)
+        month_cos = torch.cos(two_pi * month_approx / 12)
+
+        # Season indicators (based on approximate month)
+        is_winter = ((month_approx >= 11) | (month_approx < 2)).float()
+        is_spring = ((month_approx >= 2) & (month_approx < 5)).float()
+        is_summer = ((month_approx >= 5) & (month_approx < 8)).float()
+        is_fall = ((month_approx >= 8) & (month_approx < 11)).float()
+
+        # Weekend indicator (Saturday=5, Sunday=6)
+        is_weekend = (day_of_week >= 5).float()
+
+        # Holiday proximity (placeholder)
+        holiday_proximity = torch.zeros_like(ts)
+
+        # TV season indicators
+        is_tv_season = ((month_approx >= 8) | (month_approx < 4)).float()
+        is_summer_break = ((month_approx >= 5) & (month_approx < 8)).float()
+
+        # Prime time indicator (7pm-10pm = hours 19-22)
+        is_prime_time = ((hours >= 19) & (hours <= 22)).float()
+
+        # Padding features
+        padding = torch.zeros_like(ts)
+
+        # Stack all features: (batch, seq, 20)
+        features = torch.stack([
+            hour_sin, hour_cos, day_sin, day_cos, month_sin, month_cos,
+            year_norm, day_of_year_norm, is_winter, is_spring, is_summer, is_fall,
+            is_weekend, holiday_proximity, is_tv_season, is_summer_break,
+            is_prime_time, padding, padding, padding
+        ], dim=-1)
+
+        # Zero out features for invalid timestamps
+        features = features * valid_mask.unsqueeze(-1).float()
+
+        return features
     
     def forward(self,
                 show_ids: torch.Tensor,
