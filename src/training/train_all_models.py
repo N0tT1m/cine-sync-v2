@@ -1743,7 +1743,8 @@ class UnifiedTrainingPipeline:
             'early_stopping_patience', 'device', 'use_wandb', 'wandb_project',
             'num_workers', 'gradient_accumulation_steps',
             'publish_to_registry', 'registry_path',  # Model registry params
-            'skip_existing'  # Training flow control
+            'skip_existing',  # Training flow control
+            'gpu_optimizations', 'use_amp', 'use_compile',  # GPU optimization params
         }
         model_config = {k: v for k, v in config_overrides.items() if k not in training_params}
 
@@ -2577,6 +2578,33 @@ class UnifiedTrainingPipeline:
             if pred.dim() > 1 and pred.size(-1) != 1:
                 pred = pred.mean(dim=-1)
             loss = criterion(pred.squeeze(), ratings.float() / 5.0) if ratings is not None else pred.mean()
+            return loss, pred
+
+        # === GNN MODELS (LightGCN, GraphSAGE) ===
+        if self.model_name in ('gnn_recommender', 'graphsage'):
+            # GNN models need edge_index for graph structure
+            num_users = getattr(model, 'num_users', 50000)
+            num_items = getattr(model, 'num_items', 100000)
+
+            # Create edge_index from user-item pairs (bipartite graph)
+            # user -> item edges and item -> user edges
+            edge_user = user_ids
+            edge_item = item_ids + num_users  # Offset items by num_users
+            edge_index = torch.stack([
+                torch.cat([edge_user, edge_item]),
+                torch.cat([edge_item, edge_user])
+            ], dim=0).to(self.device)
+
+            # Forward pass returns (user_embeddings, item_embeddings)
+            user_embs, item_embs = model(edge_index)
+
+            # Get embeddings for specific user-item pairs and compute scores
+            user_emb = user_embs[user_ids]
+            item_emb = item_embs[item_ids]
+
+            # Dot product for rating prediction
+            pred = torch.sum(user_emb * item_emb, dim=1)
+            loss = criterion(pred, ratings.float())
             return loss, pred
 
         # === DEFAULT FORWARD (user_ids, item_ids) ===
