@@ -44,12 +44,12 @@ import torch
 
 logger = logging.getLogger(__name__)
 
-# Default registry path - relative to project root (portable across machines)
+# Default registry path - shared model registry for deployment
 # Script is at: cine-sync-v2/src/training/model_registry.py
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_REGISTRY_PATH = os.getenv(
     'CINESYNC_MODEL_REGISTRY',
-    str(_PROJECT_ROOT / 'model-registry')
+    str(_PROJECT_ROOT / '..' / '..' / 'public-projects' / 'mommy-milk-me-v2')
 )
 
 

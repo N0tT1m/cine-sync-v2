@@ -314,6 +314,31 @@ class MoodContextEncoder(nn.Module):
             return torch.zeros(1, self.output_dim)
 
 
+class DefaultBaseRecommender(nn.Module):
+    """Simple default base recommender when none is provided."""
+
+    def __init__(self, num_users: int = 50000, num_items: int = 100000, embedding_dim: int = 512):
+        super().__init__()
+        self.user_embedding = nn.Embedding(num_users, embedding_dim)
+        self.item_embedding = nn.Embedding(num_items, embedding_dim)
+        self.embedding_dim = embedding_dim
+
+    def encode_users(self, user_ids):
+        return self.user_embedding(user_ids)
+
+    def encode_items(self, item_ids):
+        return self.item_embedding(item_ids)
+
+    def forward(self, user_ids, item_ids, **kwargs):
+        user_emb = self.encode_users(user_ids)
+        item_emb = self.encode_items(item_ids)
+        return {
+            'user_embedding': user_emb,
+            'item_embedding': item_emb,
+            'score': torch.sum(user_emb * item_emb, dim=-1)
+        }
+
+
 class ContextAwareRecommender(nn.Module):
     """
     Complete context-aware recommendation system.
@@ -327,7 +352,7 @@ class ContextAwareRecommender(nn.Module):
 
     def __init__(
         self,
-        base_recommender: nn.Module,
+        base_recommender: nn.Module = None,
         user_embed_dim: int = 512,
         item_embed_dim: int = 512,
         context_dim: int = 256,
@@ -335,9 +360,17 @@ class ContextAwareRecommender(nn.Module):
         use_device: bool = True,
         use_social: bool = True,
         use_mood: bool = True,
-        context_fusion: str = 'attention'  # 'concat', 'attention', 'gated'
+        context_fusion: str = 'attention',  # 'concat', 'attention', 'gated'
+        num_users: int = 50000,
+        num_items: int = 100000
     ):
         super().__init__()
+
+        # Create default base recommender if none provided
+        if base_recommender is None:
+            base_recommender = DefaultBaseRecommender(
+                num_users=num_users, num_items=num_items, embedding_dim=user_embed_dim
+            )
 
         self.base_recommender = base_recommender
         self.context_fusion = context_fusion

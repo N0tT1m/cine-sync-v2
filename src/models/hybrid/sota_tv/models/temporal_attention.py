@@ -51,9 +51,22 @@ class SeasonalPositionalEncoding(nn.Module):
     
     def forward(self, x: torch.Tensor, time_indices: Optional[torch.Tensor] = None) -> torch.Tensor:
         if time_indices is not None:
-            # Use specific time indices
-            time_pe = self.pe[time_indices]
-            return x + time_pe.transpose(0, 1)
+            # Handle batched time indices: (batch, seq_len) or (seq_len,)
+            # pe shape: (max_len, 1, d_model)
+            # Clamp indices to valid range
+            time_indices = torch.clamp(time_indices, 0, self.pe.size(0) - 1)
+            if time_indices.dim() == 2:
+                # (batch, seq_len) -> lookup and reshape
+                batch_size, seq_len = time_indices.shape
+                flat_indices = time_indices.view(-1)
+                time_pe = self.pe[flat_indices, 0, :]  # (batch*seq, d_model)
+                time_pe = time_pe.view(batch_size, seq_len, -1)  # (batch, seq, d_model)
+                # x is (seq, batch, d_model), so transpose time_pe
+                return x + time_pe.transpose(0, 1)
+            else:
+                # (seq_len,) - original behavior
+                time_pe = self.pe[time_indices, 0, :]  # (seq, d_model)
+                return x + time_pe.unsqueeze(1)
         else:
             # Use sequential indices
             return x + self.pe[:x.size(0), :]
@@ -260,7 +273,12 @@ class TemporalAttentionTVModel(nn.Module):
         self.show_embedding = nn.Embedding(vocab_sizes.get('shows', 10000), d_model, padding_idx=0)
         self.genre_embedding = nn.Embedding(vocab_sizes.get('genres', 50), d_model // 4, padding_idx=0)
         self.network_embedding = nn.Embedding(vocab_sizes.get('networks', 100), d_model // 4, padding_idx=0)
-        
+
+        # Projection layer for combined embeddings (show + genre + network)
+        # Max combined dim: d_model + d_model//4 + d_model//4 = d_model * 1.5
+        combined_embed_dim = d_model + (d_model // 4) * 2
+        self.combined_projection = nn.Linear(combined_embed_dim, d_model)
+
         # Temporal feature projection
         self.temporal_projection = nn.Sequential(
             nn.Linear(20, d_model // 2),  # Time-based features
@@ -396,24 +414,21 @@ class TemporalAttentionTVModel(nn.Module):
         
         # Show embeddings
         show_embeds = self.show_embedding(show_ids)
-        
-        # Genre and network embeddings (if provided)
-        additional_embeds = []
+
+        # Genre and network embeddings (use zeros if not provided)
         if genre_ids is not None:
             genre_embeds = self.genre_embedding(genre_ids).mean(dim=-2)  # Average over genres
-            additional_embeds.append(genre_embeds)
-        
+        else:
+            genre_embeds = torch.zeros(batch_size, seq_len, self.d_model // 4, device=show_embeds.device)
+
         if network_ids is not None:
             network_embeds = self.network_embedding(network_ids)
-            additional_embeds.append(network_embeds)
-        
-        # Combine embeddings
-        if additional_embeds:
-            combined_embeds = torch.cat([show_embeds] + additional_embeds, dim=-1)
-            # Project to correct dimension
-            x = nn.Linear(combined_embeds.size(-1), self.d_model).to(show_embeds.device)(combined_embeds)
         else:
-            x = show_embeds
+            network_embeds = torch.zeros(batch_size, seq_len, self.d_model // 4, device=show_embeds.device)
+
+        # Combine and project embeddings
+        combined_embeds = torch.cat([show_embeds, genre_embeds, network_embeds], dim=-1)
+        x = self.combined_projection(combined_embeds)
         
         # Create temporal features
         temporal_features = self.create_temporal_features(timestamps)
@@ -424,7 +439,7 @@ class TemporalAttentionTVModel(nn.Module):
         
         # Add seasonal positional encoding
         time_indices = ((timestamps - timestamps.min()) / (24 * 3600)).long()  # Day indices
-        x = self.seasonal_pos_encoding(x.transpose(0, 1), time_indices.view(-1)).transpose(0, 1)
+        x = self.seasonal_pos_encoding(x.transpose(0, 1), time_indices).transpose(0, 1)
         
         # Seasonal decomposition
         if self.use_seasonal_decomposition:
