@@ -84,7 +84,7 @@ class BingeabilityAnalyzer(nn.Module):
 
         # Episode length variance encoder
         self.length_encoder = nn.Sequential(
-            nn.Linear(2, config.embedding_dim // 4),  # avg_length, variance
+            nn.Linear(4, config.embedding_dim // 4),  # avg_length, variance, min_length, max_length
             nn.GELU(),
             nn.Linear(config.embedding_dim // 4, config.embedding_dim // 4)
         )
@@ -338,7 +338,7 @@ class BingePredictionTrainer:
                     torch.zeros(batch_size, dtype=torch.long, device=self.device),
                     torch.zeros(batch_size, dtype=torch.long, device=self.device),
                     torch.zeros(batch_size, device=self.device),
-                    torch.zeros(batch_size, 2, device=self.device),
+                    torch.zeros(batch_size, 4, device=self.device),
                     torch.zeros(batch_size, dtype=torch.long, device=self.device),
                     torch.zeros(batch_size, dtype=torch.long, device=self.device)
                 )

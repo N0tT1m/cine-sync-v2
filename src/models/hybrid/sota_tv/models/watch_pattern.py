@@ -91,14 +91,14 @@ class ViewingHabitAnalyzer(nn.Module):
 
         # Consistency encoder
         self.consistency_encoder = nn.Sequential(
-            nn.Linear(4, config.embedding_dim // 4),  # watch_regularity, time_consistency, genre_loyalty, completion_rate
+            nn.Linear(8, config.embedding_dim // 4),  # watch_regularity, time_consistency, genre_loyalty, completion_rate, binge_frequency, session_variance, platform_loyalty, recommendation_follow_rate
             nn.GELU(),
             nn.Linear(config.embedding_dim // 4, config.embedding_dim // 4)
         )
 
         # Parallel watching encoder (multiple shows at once)
         self.parallel_encoder = nn.Sequential(
-            nn.Linear(2, config.embedding_dim // 4),  # concurrent_shows, genre_mixing
+            nn.Linear(4, config.embedding_dim // 4),  # concurrent_shows, genre_mixing, show_switching_rate, parallel_completion_rate
             nn.GELU(),
             nn.Linear(config.embedding_dim // 4, config.embedding_dim // 4)
         )

@@ -34,7 +34,7 @@ class CompletionPatternEncoder(nn.Module):
 
         # Progress encoding
         self.progress_encoder = nn.Sequential(
-            nn.Linear(4, config.embedding_dim // 2),  # episodes_watched, total_episodes, percentage, seasons_watched
+            nn.Linear(8, config.embedding_dim // 2),  # episodes_watched, total_episodes, percentage, seasons_watched, current_season, episodes_in_season, season_progress, overall_progress
             nn.GELU(),
             nn.Linear(config.embedding_dim // 2, config.embedding_dim // 2)
         )
@@ -45,7 +45,7 @@ class CompletionPatternEncoder(nn.Module):
 
         # Gap analysis encoding
         self.gap_encoder = nn.Sequential(
-            nn.Linear(3, config.embedding_dim // 4),  # avg_gap, max_gap, recent_gap
+            nn.Linear(4, config.embedding_dim // 4),  # avg_gap, max_gap, recent_gap, gap_variance
             nn.GELU(),
             nn.Linear(config.embedding_dim // 4, config.embedding_dim // 4)
         )
