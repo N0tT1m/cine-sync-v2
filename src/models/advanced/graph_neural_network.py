@@ -31,8 +31,13 @@ class LightGCNConv(MessagePassing):
 
     def __init__(self):
         """Initialize LightGCN convolution with additive aggregation"""
-        # Note: In newer PyTorch Geometric versions, aggr is specified directly
-        super(LightGCNConv, self).__init__(aggr='add')
+        # Compatible with both old and new PyTorch Geometric API
+        try:
+            super(LightGCNConv, self).__init__(aggr='add')
+        except TypeError:
+            # Newer PyTorch Geometric versions (2.4+) don't accept aggr in __init__
+            super(LightGCNConv, self).__init__()
+            self.aggr = 'add'
     
     def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
         """

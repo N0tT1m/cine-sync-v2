@@ -404,7 +404,7 @@ CONTENT_AGNOSTIC_MODELS = {
     },
     'gnn_recommender': {
         'module': 'src.models.advanced.graph_neural_network',
-        'model_class': 'GNNRecommender',
+        'model_class': 'LightGCN',
         'trainer_class': None,
         'config_class': None,
         'description': 'Graph neural network rec',
@@ -1196,9 +1196,9 @@ class UnifiedDataset(Dataset):
                 'universe_ids': {'type': 'int_seq', 'max': 500, 'seq_len': 20},  # Must match num_universes=500
                 'universe_positions': {'type': 'int_seq', 'max': 100, 'seq_len': 20},  # Must match max_timeline_length=100
                 'release_positions': {'type': 'int_seq', 'max': 100, 'seq_len': 20},  # Must match max_timeline_length=100
-                'phases': {'type': 'int_seq', 'max': 20, 'seq_len': 20},  # Must match phase_embedding size=20
+                'phases': {'type': 'int_seq', 'max': 21, 'seq_len': 20},  # Must match nn.Embedding(21)
                 'adjacency': {'type': 'float_seq', 'seq_len': 20},  # Simplified adjacency
-                'connection_types': {'type': 'int_seq', 'max': 10, 'seq_len': 20},  # Must match connection_types size=10
+                'connection_types': {'type': 'int_seq', 'max': 11, 'seq_len': 20},  # Must match nn.Embedding(11)
                 'ratings': {'type': 'float', 'min': 1, 'max': 5},
                 'next_movie': {'type': 'int', 'max': 100000},
                 'preferred_order': {'type': 'int', 'max': 3},
@@ -1225,15 +1225,15 @@ class UnifiedDataset(Dataset):
             'movie_viewing_context': {
                 'user_ids': {'type': 'int', 'max': 50000},
                 'movie_ids': {'type': 'int', 'max': 100000},
-                'social_context': {'type': 'int', 'max': 30},  # Must match num_contexts=30
-                'time_context': {'type': 'int', 'max': 24},
-                'venue': {'type': 'int', 'max': 10},
+                'social_context': {'type': 'int', 'max': 8},  # Must match nn.Embedding(8) - model clamps to 0-7
+                'time_context': {'type': 'int', 'max': 8},  # Must match nn.Embedding(8) - model clamps to 0-7
+                'venue': {'type': 'int', 'max': 10},  # Matches nn.Embedding(10)
                 'duration_features': {'type': 'float_seq', 'seq_len': 2},
                 'mood_ids': {'type': 'int', 'max': 20},  # Must match num_moods=20
                 'energy_level': {'type': 'float', 'min': 0, 'max': 1},
-                'desired_outcome': {'type': 'int', 'max': 10},
+                'desired_outcome': {'type': 'int', 'max': 10},  # Matches nn.Embedding(10)
                 'occasion_ids': {'type': 'int', 'max': 25},  # Must match num_occasions=25
-                'season_ids': {'type': 'int', 'max': 4},
+                'season_ids': {'type': 'int', 'max': 4},  # Matches nn.Embedding(4)
                 'ratings': {'type': 'float', 'min': 1, 'max': 5},
             },
             'movie_awards_prediction': {
@@ -1282,7 +1282,7 @@ class UnifiedDataset(Dataset):
                 'distributor_ids': {'type': 'int', 'max': 500},  # Must match num_distributors=500
                 'prod_company_ids': {'type': 'int', 'max': 5000},  # Must match num_production_companies=5000
                 'characteristics': {'type': 'float_seq', 'seq_len': 16},
-                'studio_types': {'type': 'int', 'max': 10},
+                'studio_types': {'type': 'int', 'max': 11},  # Must match nn.Embedding(11)
                 'genre_dist': {'type': 'float_seq', 'seq_len': 30},
                 'budget_quality': {'type': 'float_seq', 'seq_len': 4},
                 'franchise_features': {'type': 'float_seq', 'seq_len': 8},
@@ -1376,18 +1376,18 @@ class UnifiedDataset(Dataset):
                 'session_duration': {'type': 'float', 'min': 0, 'max': 24},
                 'time_of_day': {'type': 'int', 'max': 24},
                 'day_of_week': {'type': 'int', 'max': 7},
-                'session_types': {'type': 'int', 'max': 10},
+                'session_types': {'type': 'int', 'max': 5},  # Must match nn.Embedding(5)
                 'cliffhanger_scores': {'type': 'float', 'min': 0, 'max': 1},
                 'length_features': {'type': 'float_seq', 'seq_len': 4},
-                'structure_types': {'type': 'int', 'max': 10},
-                'release_patterns': {'type': 'int', 'max': 5},
+                'structure_types': {'type': 'int', 'max': 6},  # Must match nn.Embedding(6)
+                'release_patterns': {'type': 'int', 'max': 4},  # Must match nn.Embedding(4)
                 'ratings': {'type': 'float', 'min': 1, 'max': 5},
             },
             'tv_series_completion': {
                 'user_ids': {'type': 'int', 'max': 50000},
                 'show_ids': {'type': 'int', 'max': 50000},
                 'progress_features': {'type': 'float_seq', 'seq_len': 8},
-                'engagement_types': {'type': 'int', 'max': 10},
+                'engagement_types': {'type': 'int', 'max': 5},  # Must match nn.Embedding(5)
                 'gap_features': {'type': 'float_seq', 'seq_len': 4},
                 'completed': {'type': 'bool'},
             },
@@ -1396,7 +1396,7 @@ class UnifiedDataset(Dataset):
                 'show_ids': {'type': 'int', 'max': 50000},
                 'season_positions': {'type': 'int', 'max': 30},
                 'quality_features': {'type': 'float_seq', 'seq_len': 8},
-                'season_types': {'type': 'int', 'max': 10},
+                'season_types': {'type': 'int', 'max': 6},  # Must match nn.Embedding(6)
                 'change_features': {'type': 'float_seq', 'seq_len': 8},
                 'ratings': {'type': 'float', 'min': 1, 'max': 5},
             },
@@ -1404,7 +1404,7 @@ class UnifiedDataset(Dataset):
                 'user_ids': {'type': 'int', 'max': 50000},
                 'show_ids': {'type': 'int', 'max': 50000},
                 'platform_ids': {'type': 'int', 'max': 50},
-                'platform_types': {'type': 'int', 'max': 10},
+                'platform_types': {'type': 'int', 'max': 6},  # Must match nn.Embedding(6)
                 'platform_features': {'type': 'float_seq', 'seq_len': 8},
                 'region_ids': {'type': 'int', 'max': 200},
                 'ratings': {'type': 'float', 'min': 1, 'max': 5},
@@ -1417,7 +1417,7 @@ class UnifiedDataset(Dataset):
                 'months': {'type': 'int', 'max': 12},
                 'durations': {'type': 'float', 'min': 0, 'max': 24},
                 'gaps': {'type': 'float', 'min': 0, 'max': 365},
-                'habit_types': {'type': 'int', 'max': 10},
+                'habit_types': {'type': 'int', 'max': 8},  # Must match nn.Embedding(8)
                 'consistency_features': {'type': 'float_seq', 'seq_len': 8},
                 'parallel_features': {'type': 'float_seq', 'seq_len': 4},
                 'ratings': {'type': 'float', 'min': 1, 'max': 5},
@@ -1427,15 +1427,15 @@ class UnifiedDataset(Dataset):
                 'show_ids': {'type': 'int', 'max': 50000},
                 'stage_ids': {'type': 'int', 'max': 10},
                 'health_features': {'type': 'float_seq', 'seq_len': 8},
-                'network_status': {'type': 'int', 'max': 10},
+                'network_status': {'type': 'int', 'max': 5},  # Must match nn.Embedding(5)
                 'ratings': {'type': 'float', 'min': 1, 'max': 5},
             },
             'tv_cast_migration': {
                 'user_ids': {'type': 'int', 'max': 50000},
                 'show_ids': {'type': 'int', 'max': 50000},
                 'actor_ids': {'type': 'int_seq', 'max': 100000, 'seq_len': 10},
-                'role_types': {'type': 'int_seq', 'max': 10, 'seq_len': 10},
-                'status_ids': {'type': 'int_seq', 'max': 10, 'seq_len': 10},
+                'role_types': {'type': 'int_seq', 'max': 6, 'seq_len': 10},  # Must match nn.Embedding(6)
+                'status_ids': {'type': 'int_seq', 'max': 5, 'seq_len': 10},  # Must match nn.Embedding(5)
                 'screen_time': {'type': 'float_seq', 'seq_len': 10},
                 'ratings': {'type': 'float', 'min': 1, 'max': 5},
             },
