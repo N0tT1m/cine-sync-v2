@@ -19,6 +19,7 @@ Supports:
 import argparse
 import logging
 import os
+import platform
 import sys
 from pathlib import Path
 
@@ -1765,8 +1766,6 @@ class UnifiedTrainingPipeline:
                 dedicated_scripts = {
                     'tv_graph_neural': 'src/models/hybrid/sota_tv/training/train_gnn.py',
                     'tv_contrastive': 'src/models/hybrid/sota_tv/training/train_contrastive.py',
-                    'unified_contrastive': 'requires base_model parameter',
-                    'context_aware': 'requires base_recommender parameter',
                 }
                 script_info = dedicated_scripts.get(self.model_name, 'dedicated training script')
                 raise ValueError(
@@ -1991,16 +1990,20 @@ class UnifiedTrainingPipeline:
                 'num_movies': 100000,
             },
             'unified_contrastive': {
-                # Requires base_model parameter - mark as skip
-                '_skip': True,
+                'embed_dim': 512,
+                'projection_dim': 256,
+                'num_users': 50000,
+                'num_items': 100000,
             },
             'multimodal_features': {
                 # All defaults work - no positional args required
                 'final_output_dim': 768,
             },
             'context_aware': {
-                # Requires base_recommender parameter - mark as skip
-                '_skip': True,
+                'user_embed_dim': 512,
+                'item_embed_dim': 512,
+                'num_users': 50000,
+                'num_items': 100000,
             },
         }
 
@@ -2628,13 +2631,17 @@ class UnifiedTrainingPipeline:
         model = model.to(self.device)
 
         # RTX 4090 Optimization: torch.compile() for faster execution
+        # Skip on Windows as Triton is not supported
         if self.use_compile and hasattr(torch, 'compile'):
-            try:
-                logger.info("Compiling model with torch.compile()...")
-                model = torch.compile(model, mode='reduce-overhead')
-                logger.info("✓ Model compiled successfully")
-            except Exception as e:
-                logger.warning(f"torch.compile() failed, using eager mode: {e}")
+            if platform.system() == 'Windows':
+                logger.info("Skipping torch.compile() on Windows (Triton not supported)")
+            else:
+                try:
+                    logger.info("Compiling model with torch.compile()...")
+                    model = torch.compile(model, mode='reduce-overhead')
+                    logger.info("✓ Model compiled successfully")
+                except Exception as e:
+                    logger.warning(f"torch.compile() failed, using eager mode: {e}")
 
         # RTX 4090 Optimization: Fused AdamW for faster optimizer steps
         optimizer_kwargs = {'lr': lr, 'weight_decay': weight_decay}
@@ -3117,7 +3124,7 @@ Examples:
     parser.add_argument('--no-publish', action='store_true',
                        help='Disable automatic publishing to model registry')
     parser.add_argument('--registry-path', type=str,
-                       default=os.getenv('CINESYNC_MODEL_REGISTRY', str(project_root / 'model-registry')),
+                       default=os.getenv('CINESYNC_MODEL_REGISTRY', str(project_root / '..' / '..' / 'public-projects' / 'mommy-milk-me-v2')),
                        help='Path to the local model registry')
 
     # RTX 4090 optimization options

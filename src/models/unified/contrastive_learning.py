@@ -89,6 +89,30 @@ class InfoNCELoss(nn.Module):
         return loss
 
 
+class DefaultBaseModel(nn.Module):
+    """Simple default base model for contrastive learning when none is provided."""
+
+    def __init__(self, num_users: int = 50000, num_items: int = 100000, embedding_dim: int = 512):
+        super().__init__()
+        self.user_embedding = nn.Embedding(num_users, embedding_dim)
+        self.item_embedding = nn.Embedding(num_items, embedding_dim)
+        self.fc = nn.Sequential(
+            nn.Linear(embedding_dim * 2, embedding_dim),
+            nn.ReLU(),
+            nn.Linear(embedding_dim, embedding_dim)
+        )
+
+    def forward(self, user_ids=None, item_ids=None, **kwargs):
+        if user_ids is None:
+            user_ids = kwargs.get('user_id', torch.zeros(1, dtype=torch.long))
+        if item_ids is None:
+            item_ids = kwargs.get('item_id', torch.zeros(1, dtype=torch.long))
+        user_emb = self.user_embedding(user_ids)
+        item_emb = self.item_embedding(item_ids)
+        combined = torch.cat([user_emb, item_emb], dim=-1)
+        return {'embedding': self.fc(combined), 'final_embedding': self.fc(combined)}
+
+
 class ContrastiveLearningModule(nn.Module):
     """
     Contrastive learning wrapper that can be added to any recommendation model.
@@ -101,15 +125,21 @@ class ContrastiveLearningModule(nn.Module):
 
     def __init__(
         self,
-        base_model: nn.Module,
+        base_model: nn.Module = None,
         embed_dim: int = 512,
         projection_dim: int = 256,
         temperature: float = 0.07,
         use_momentum_encoder: bool = True,
         momentum: float = 0.999,
-        queue_size: int = 65536
+        queue_size: int = 65536,
+        num_users: int = 50000,
+        num_items: int = 100000
     ):
         super().__init__()
+
+        # Create default base model if none provided
+        if base_model is None:
+            base_model = DefaultBaseModel(num_users=num_users, num_items=num_items, embedding_dim=embed_dim)
 
         self.base_model = base_model
         self.embed_dim = embed_dim
