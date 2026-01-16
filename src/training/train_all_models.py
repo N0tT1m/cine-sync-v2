@@ -2151,16 +2151,28 @@ class UnifiedTrainingPipeline:
         Returns (loss, predictions) tuple.
         """
         # Helper to move batch tensors to device
-        def to_device(key, default=None):
-            val = batch.get(key, default)
+        def to_device(key):
+            val = batch.get(key)
             if val is not None and hasattr(val, 'to'):
                 return val.to(self.device)
-            return val
+            return None
+
+        # Helper that returns the first non-None value (avoids boolean tensor issues)
+        def first_valid(*args):
+            for arg in args:
+                if arg is not None:
+                    return arg
+            return None
+
+        # Helper to get value with fallback default
+        def get_or_default(key, default_fn):
+            val = to_device(key)
+            return val if val is not None else default_fn()
 
         # Common tensors
-        user_ids = to_device('user_ids') or to_device('user_id')
-        item_ids = to_device('item_ids') or to_device('movie_ids') or to_device('show_ids')
-        ratings = to_device('ratings') or to_device('rating')
+        user_ids = first_valid(to_device('user_ids'), to_device('user_id'))
+        item_ids = first_valid(to_device('item_ids'), to_device('movie_ids'), to_device('show_ids'))
+        ratings = first_valid(to_device('ratings'), to_device('rating'))
         batch_size = user_ids.size(0) if user_ids is not None else 256
 
         # === TV MODEL-SPECIFIC FORWARD HANDLING ===
@@ -2182,7 +2194,7 @@ class UnifiedTrainingPipeline:
             }
             show_pairs = torch.randint(0, min(num_shows, 1000), (batch_size, 2), device=self.device)
             outputs = model(x_dict=x_dict, edge_index_dict=edge_index_dict, show_pairs=show_pairs)
-            pred = outputs.get('cosine_similarity') or outputs.get('similarity_scores') or list(outputs.values())[0]
+            pred = first_valid(outputs.get('cosine_similarity'), outputs.get('similarity_scores'), list(outputs.values())[0])
             target = ratings.float() / 5.0 if ratings is not None else torch.rand(batch_size, device=self.device)
             loss = criterion(pred.squeeze()[:len(target)], target)
             return loss, pred
@@ -2215,34 +2227,26 @@ class UnifiedTrainingPipeline:
 
         # TV Temporal Attention
         if self.model_name == 'tv_temporal_attention':
-            show_ids = to_device('show_ids') or item_ids
-            timestamps = to_device('timestamps')
-            if timestamps is None:
-                timestamps = torch.rand(batch_size, 10, device=self.device)
+            show_ids = first_valid(to_device('show_ids'), item_ids)
+            timestamps = get_or_default('timestamps', lambda: torch.rand(batch_size, 10, device=self.device))
             outputs = model(show_ids=show_ids, timestamps=timestamps)
-            pred = outputs.get('predictions') or outputs.get('rating_pred') or list(outputs.values())[0]
+            pred = first_valid(outputs.get('predictions'), outputs.get('rating_pred'), list(outputs.values())[0])
             loss = criterion(pred.squeeze(), ratings.float()) if ratings is not None else pred.mean()
             return loss, pred
 
         # TV Meta Learning
         if self.model_name == 'tv_meta_learning':
-            base_features = to_device('base_features')
-            if base_features is None:
-                base_features = torch.rand(batch_size, 1024, device=self.device)
+            base_features = get_or_default('base_features', lambda: torch.rand(batch_size, 1024, device=self.device))
             outputs = model(base_features=base_features)
-            pred = outputs.get('adapted_predictions') or outputs.get('predictions') or list(outputs.values())[0]
+            pred = first_valid(outputs.get('adapted_predictions'), outputs.get('predictions'), list(outputs.values())[0])
             loss = criterion(pred.squeeze(), ratings.float()) if ratings is not None else pred.mean()
             return loss, pred
 
         # TV Multimodal
         if self.model_name == 'tv_multimodal':
             seq_len = 64
-            text_input_ids = to_device('text_input_ids')
-            if text_input_ids is None:
-                text_input_ids = torch.randint(0, 30000, (batch_size, seq_len), device=self.device)
-            text_attention_mask = to_device('text_attention_mask')
-            if text_attention_mask is None:
-                text_attention_mask = torch.ones(batch_size, seq_len, device=self.device)
+            text_input_ids = get_or_default('text_input_ids', lambda: torch.randint(0, 30000, (batch_size, seq_len), device=self.device))
+            text_attention_mask = get_or_default('text_attention_mask', lambda: torch.ones(batch_size, seq_len, device=self.device))
             categorical_features = {
                 'genres': torch.randint(0, 50, (batch_size, 5), device=self.device),
                 'networks': torch.randint(0, 100, (batch_size, 3), device=self.device),
@@ -2252,7 +2256,7 @@ class UnifiedTrainingPipeline:
                 text_input_ids=text_input_ids, text_attention_mask=text_attention_mask,
                 categorical_features=categorical_features, numerical_features=numerical_features
             )
-            pred = outputs.get('predictions') or outputs.get('embeddings') or list(outputs.values())[0]
+            pred = first_valid(outputs.get('predictions'), outputs.get('embeddings'), list(outputs.values())[0])
             if pred.dim() > 1 and pred.size(-1) != 1:
                 pred = pred.mean(dim=-1)
             loss = criterion(pred.squeeze(), ratings.float()) if ratings is not None else pred.mean()
@@ -2260,109 +2264,109 @@ class UnifiedTrainingPipeline:
 
         # TV Binge Prediction
         if self.model_name == 'tv_binge_prediction':
-            show_ids = to_device('show_ids') or item_ids
+            show_ids = first_valid(to_device('show_ids'), item_ids)
             outputs = model(
                 user_ids=user_ids, show_ids=show_ids,
-                session_duration=to_device('session_duration') or torch.rand(batch_size, device=self.device),
-                time_of_day=to_device('time_of_day') or torch.randint(0, 24, (batch_size,), device=self.device),
-                day_of_week=to_device('day_of_week') or torch.randint(0, 7, (batch_size,), device=self.device),
-                session_types=to_device('session_types') or torch.randint(0, 5, (batch_size,), device=self.device),
-                cliffhanger_scores=to_device('cliffhanger_scores') or torch.rand(batch_size, device=self.device),
-                length_features=to_device('length_features') or torch.rand(batch_size, device=self.device),
-                structure_types=to_device('structure_types') or torch.randint(0, 5, (batch_size,), device=self.device),
-                release_patterns=to_device('release_patterns') or torch.randint(0, 3, (batch_size,), device=self.device),
+                session_duration=get_or_default('session_duration', lambda: torch.rand(batch_size, device=self.device)),
+                time_of_day=get_or_default('time_of_day', lambda: torch.randint(0, 24, (batch_size,), device=self.device)),
+                day_of_week=get_or_default('day_of_week', lambda: torch.randint(0, 7, (batch_size,), device=self.device)),
+                session_types=get_or_default('session_types', lambda: torch.randint(0, 5, (batch_size,), device=self.device)),
+                cliffhanger_scores=get_or_default('cliffhanger_scores', lambda: torch.rand(batch_size, device=self.device)),
+                length_features=get_or_default('length_features', lambda: torch.rand(batch_size, 4, device=self.device)),
+                structure_types=get_or_default('structure_types', lambda: torch.randint(0, 6, (batch_size,), device=self.device)),
+                release_patterns=get_or_default('release_patterns', lambda: torch.randint(0, 4, (batch_size,), device=self.device)),
             )
-            pred = outputs.get('binge_probability') or outputs.get('predictions') or list(outputs.values())[0]
+            pred = first_valid(outputs.get('binge_probability'), outputs.get('predictions'), list(outputs.values())[0])
             loss = criterion(pred.squeeze(), ratings.float() / 5.0) if ratings is not None else pred.mean()
             return loss, pred
 
         # TV Series Completion
         if self.model_name == 'tv_series_completion':
-            show_ids = to_device('show_ids') or item_ids
+            show_ids = first_valid(to_device('show_ids'), item_ids)
             seq_len = 10
             outputs = model(
                 user_ids=user_ids, show_ids=show_ids,
-                progress_features=to_device('progress_features') or torch.rand(batch_size, seq_len, device=self.device),
-                engagement_types=to_device('engagement_types') or torch.randint(0, 5, (batch_size, seq_len), device=self.device),
-                gap_features=to_device('gap_features') or torch.rand(batch_size, seq_len, device=self.device),
+                progress_features=get_or_default('progress_features', lambda: torch.rand(batch_size, seq_len, device=self.device)),
+                engagement_types=get_or_default('engagement_types', lambda: torch.randint(0, 5, (batch_size, seq_len), device=self.device)),
+                gap_features=get_or_default('gap_features', lambda: torch.rand(batch_size, seq_len, device=self.device)),
             )
-            pred = outputs.get('completion_probability') or outputs.get('predictions') or list(outputs.values())[0]
+            pred = first_valid(outputs.get('completion_probability'), outputs.get('predictions'), list(outputs.values())[0])
             loss = criterion(pred.squeeze(), ratings.float() / 5.0) if ratings is not None else pred.mean()
             return loss, pred
 
         # TV Season Quality
         if self.model_name == 'tv_season_quality':
-            show_ids = to_device('show_ids') or item_ids
+            show_ids = first_valid(to_device('show_ids'), item_ids)
             seq_len = 10
             outputs = model(
                 user_ids=user_ids, show_ids=show_ids,
-                season_positions=to_device('season_positions') or torch.randint(0, 20, (batch_size, seq_len), device=self.device),
-                quality_features=to_device('quality_features') or torch.rand(batch_size, seq_len, device=self.device),
-                season_types=to_device('season_types') or torch.randint(0, 5, (batch_size, seq_len), device=self.device),
-                change_features=to_device('change_features') or torch.rand(batch_size, seq_len, device=self.device),
+                season_positions=get_or_default('season_positions', lambda: torch.randint(0, 20, (batch_size, seq_len), device=self.device)),
+                quality_features=get_or_default('quality_features', lambda: torch.rand(batch_size, seq_len, device=self.device)),
+                season_types=get_or_default('season_types', lambda: torch.randint(0, 6, (batch_size, seq_len), device=self.device)),
+                change_features=get_or_default('change_features', lambda: torch.rand(batch_size, seq_len, device=self.device)),
             )
-            pred = outputs.get('quality_scores') or outputs.get('predictions') or list(outputs.values())[0]
+            pred = first_valid(outputs.get('quality_scores'), outputs.get('predictions'), list(outputs.values())[0])
             loss = criterion(pred.squeeze(), ratings.float()) if ratings is not None else pred.mean()
             return loss, pred
 
         # TV Platform Availability
         if self.model_name == 'tv_platform_availability':
-            show_ids = to_device('show_ids') or item_ids
+            show_ids = first_valid(to_device('show_ids'), item_ids)
             outputs = model(
                 user_ids=user_ids, show_ids=show_ids,
-                platform_ids=to_device('platform_ids') or torch.randint(0, 20, (batch_size,), device=self.device),
-                platform_types=to_device('platform_types') or torch.randint(0, 5, (batch_size,), device=self.device),
-                platform_features=to_device('platform_features') or torch.rand(batch_size, 8, device=self.device),
-                region_ids=to_device('region_ids') or torch.randint(0, 50, (batch_size,), device=self.device),
+                platform_ids=get_or_default('platform_ids', lambda: torch.randint(0, 20, (batch_size,), device=self.device)),
+                platform_types=get_or_default('platform_types', lambda: torch.randint(0, 6, (batch_size,), device=self.device)),
+                platform_features=get_or_default('platform_features', lambda: torch.rand(batch_size, 8, device=self.device)),
+                region_ids=get_or_default('region_ids', lambda: torch.randint(0, 50, (batch_size,), device=self.device)),
             )
-            pred = outputs.get('availability_score') or outputs.get('predictions') or list(outputs.values())[0]
+            pred = first_valid(outputs.get('availability_score'), outputs.get('predictions'), list(outputs.values())[0])
             loss = criterion(pred.squeeze(), ratings.float() / 5.0) if ratings is not None else pred.mean()
             return loss, pred
 
         # TV Watch Pattern
         if self.model_name == 'tv_watch_pattern':
-            show_ids = to_device('show_ids') or item_ids
+            show_ids = first_valid(to_device('show_ids'), item_ids)
             seq_len = 10
             outputs = model(
                 user_ids=user_ids, show_ids=show_ids,
-                hours=to_device('hours') or torch.randint(0, 24, (batch_size, seq_len), device=self.device),
-                days=to_device('days') or torch.randint(0, 7, (batch_size, seq_len), device=self.device),
-                months=to_device('months') or torch.randint(0, 12, (batch_size, seq_len), device=self.device),
-                durations=to_device('durations') or torch.rand(batch_size, seq_len, device=self.device),
-                gaps=to_device('gaps') or torch.rand(batch_size, seq_len, device=self.device),
-                habit_types=to_device('habit_types') or torch.randint(0, 5, (batch_size, seq_len), device=self.device),
-                consistency_features=to_device('consistency_features') or torch.rand(batch_size, seq_len, device=self.device),
-                parallel_features=to_device('parallel_features') or torch.rand(batch_size, seq_len, device=self.device),
+                hours=get_or_default('hours', lambda: torch.randint(0, 24, (batch_size, seq_len), device=self.device)),
+                days=get_or_default('days', lambda: torch.randint(0, 7, (batch_size, seq_len), device=self.device)),
+                months=get_or_default('months', lambda: torch.randint(0, 12, (batch_size, seq_len), device=self.device)),
+                durations=get_or_default('durations', lambda: torch.rand(batch_size, seq_len, device=self.device)),
+                gaps=get_or_default('gaps', lambda: torch.rand(batch_size, seq_len, device=self.device)),
+                habit_types=get_or_default('habit_types', lambda: torch.randint(0, 8, (batch_size, seq_len), device=self.device)),
+                consistency_features=get_or_default('consistency_features', lambda: torch.rand(batch_size, seq_len, device=self.device)),
+                parallel_features=get_or_default('parallel_features', lambda: torch.rand(batch_size, seq_len, device=self.device)),
             )
-            pred = outputs.get('pattern_scores') or outputs.get('predictions') or list(outputs.values())[0]
+            pred = first_valid(outputs.get('pattern_scores'), outputs.get('predictions'), list(outputs.values())[0])
             loss = criterion(pred.squeeze(), ratings.float()) if ratings is not None else pred.mean()
             return loss, pred
 
         # TV Series Lifecycle
         if self.model_name == 'tv_series_lifecycle':
-            show_ids = to_device('show_ids') or item_ids
+            show_ids = first_valid(to_device('show_ids'), item_ids)
             outputs = model(
                 user_ids=user_ids, show_ids=show_ids,
-                stage_ids=to_device('stage_ids') or torch.randint(0, 10, (batch_size,), device=self.device),
-                health_features=to_device('health_features') or torch.rand(batch_size, 8, device=self.device),
-                network_status=to_device('network_status') or torch.randint(0, 5, (batch_size,), device=self.device),
+                stage_ids=get_or_default('stage_ids', lambda: torch.randint(0, 10, (batch_size,), device=self.device)),
+                health_features=get_or_default('health_features', lambda: torch.rand(batch_size, 8, device=self.device)),
+                network_status=get_or_default('network_status', lambda: torch.randint(0, 5, (batch_size,), device=self.device)),
             )
-            pred = outputs.get('lifecycle_score') or outputs.get('predictions') or list(outputs.values())[0]
+            pred = first_valid(outputs.get('lifecycle_score'), outputs.get('predictions'), list(outputs.values())[0])
             loss = criterion(pred.squeeze(), ratings.float()) if ratings is not None else pred.mean()
             return loss, pred
 
         # TV Cast Migration
         if self.model_name == 'tv_cast_migration':
-            show_ids = to_device('show_ids') or item_ids
+            show_ids = first_valid(to_device('show_ids'), item_ids)
             seq_len = 10
             outputs = model(
                 user_ids=user_ids, show_ids=show_ids,
-                actor_ids=to_device('actor_ids') or torch.randint(0, 10000, (batch_size, seq_len), device=self.device),
-                role_types=to_device('role_types') or torch.randint(0, 5, (batch_size, seq_len), device=self.device),
-                status_ids=to_device('status_ids') or torch.randint(0, 5, (batch_size, seq_len), device=self.device),
-                screen_time=to_device('screen_time') or torch.rand(batch_size, seq_len, device=self.device),
+                actor_ids=get_or_default('actor_ids', lambda: torch.randint(0, 10000, (batch_size, seq_len), device=self.device)),
+                role_types=get_or_default('role_types', lambda: torch.randint(0, 6, (batch_size, seq_len), device=self.device)),
+                status_ids=get_or_default('status_ids', lambda: torch.randint(0, 5, (batch_size, seq_len), device=self.device)),
+                screen_time=get_or_default('screen_time', lambda: torch.rand(batch_size, seq_len, device=self.device)),
             )
-            pred = outputs.get('cast_impact_score') or outputs.get('predictions') or list(outputs.values())[0]
+            pred = first_valid(outputs.get('cast_impact_score'), outputs.get('predictions'), list(outputs.values())[0])
             loss = criterion(pred.squeeze(), ratings.float()) if ratings is not None else pred.mean()
             return loss, pred
 
@@ -2373,7 +2377,7 @@ class UnifiedTrainingPipeline:
         outputs = model(user_ids, item_ids)
 
         if isinstance(outputs, dict):
-            pred = outputs.get('rating_pred') or outputs.get('predictions') or outputs.get('scores')
+            pred = first_valid(outputs.get('rating_pred'), outputs.get('predictions'), outputs.get('scores'))
             if pred is None:
                 pred = list(outputs.values())[0]
         else:
