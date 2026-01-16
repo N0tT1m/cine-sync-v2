@@ -479,10 +479,12 @@ class TemporalAttentionTVModel(nn.Module):
         final_features = self.final_projection(seq_representation)
         
         # Output predictions
+        popularity_pred = self.popularity_head(final_features)
         outputs = {
             'sequence_features': x,
             'global_features': final_features,
-            'popularity_prediction': self.popularity_head(final_features),
+            'popularity_prediction': popularity_pred,
+            'predictions': popularity_pred,  # Alias for training compatibility
             'trend_prediction': self.trend_head(final_features)
         }
         
