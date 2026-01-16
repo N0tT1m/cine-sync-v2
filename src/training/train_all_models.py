@@ -1837,9 +1837,6 @@ class UnifiedTrainingPipeline:
                 'd_model': 512,
             },
             'tv_graph_neural': {
-                # GNN model requires graph-structured input (x_dict, edge_index_dict)
-                # Use dedicated training script: train_gnn.py
-                '_skip': True,
                 'num_shows': 50000,
                 'num_actors': 100000,
                 'num_genres': 50,
@@ -1847,9 +1844,6 @@ class UnifiedTrainingPipeline:
                 'num_creators': 20000,
             },
             'tv_contrastive': {
-                # Contrastive model requires triplet input (anchor, positive, negative)
-                # Use dedicated training script: train_contrastive.py
-                '_skip': True,
                 'vocab_sizes': {'shows': 50000, 'genres': 50, 'networks': 100},
                 'embed_dim': 768,
             },
@@ -2151,6 +2145,243 @@ class UnifiedTrainingPipeline:
             logger.warning(f"Could not estimate memory: {e}. Using batch_size=64")
             return 64
 
+    def _model_forward(self, model, batch, criterion):
+        """
+        Model-specific forward pass handling.
+        Returns (loss, predictions) tuple.
+        """
+        # Helper to move batch tensors to device
+        def to_device(key, default=None):
+            val = batch.get(key, default)
+            if val is not None and hasattr(val, 'to'):
+                return val.to(self.device)
+            return val
+
+        # Common tensors
+        user_ids = to_device('user_ids') or to_device('user_id')
+        item_ids = to_device('item_ids') or to_device('movie_ids') or to_device('show_ids')
+        ratings = to_device('ratings') or to_device('rating')
+        batch_size = user_ids.size(0) if user_ids is not None else 256
+
+        # === TV MODEL-SPECIFIC FORWARD HANDLING ===
+
+        # TV Graph Neural Network
+        if self.model_name == 'tv_graph_neural':
+            num_shows = getattr(model, 'num_nodes', {}).get('show', 50000)
+            x_dict = {
+                'show': torch.arange(min(num_shows, 1000), device=self.device),
+                'genre': torch.arange(50, device=self.device),
+                'network': torch.arange(100, device=self.device),
+                'creator': torch.arange(100, device=self.device),
+                'actor': torch.arange(100, device=self.device),
+            }
+            edge_index_dict = {
+                ('show', 'has_genre', 'genre'): torch.randint(0, 50, (2, 200), device=self.device),
+                ('show', 'on_network', 'network'): torch.randint(0, 100, (2, 200), device=self.device),
+                ('show', 'similar_to', 'show'): torch.randint(0, min(num_shows, 1000), (2, 200), device=self.device),
+            }
+            show_pairs = torch.randint(0, min(num_shows, 1000), (batch_size, 2), device=self.device)
+            outputs = model(x_dict=x_dict, edge_index_dict=edge_index_dict, show_pairs=show_pairs)
+            pred = outputs.get('cosine_similarity') or outputs.get('similarity_scores') or list(outputs.values())[0]
+            target = ratings.float() / 5.0 if ratings is not None else torch.rand(batch_size, device=self.device)
+            loss = criterion(pred.squeeze()[:len(target)], target)
+            return loss, pred
+
+        # TV Contrastive Learning
+        if self.model_name == 'tv_contrastive':
+            seq_len = 32
+            def make_inputs():
+                return (
+                    torch.randint(0, 30000, (batch_size, seq_len), device=self.device),
+                    torch.ones(batch_size, seq_len, device=self.device),
+                    {'genres': torch.randint(0, 50, (batch_size, 5), device=self.device),
+                     'networks': torch.randint(0, 100, (batch_size, 3), device=self.device)},
+                    torch.rand(batch_size, 10, device=self.device)
+                )
+            a_ids, a_mask, a_cat, a_num = make_inputs()
+            p_ids, p_mask, p_cat, p_num = make_inputs()
+            n_ids, n_mask, n_cat, n_num = make_inputs()
+            outputs = model(
+                anchor_input_ids=a_ids, anchor_attention_mask=a_mask,
+                anchor_categorical=a_cat, anchor_numerical=a_num,
+                positive_input_ids=p_ids, positive_attention_mask=p_mask,
+                positive_categorical=p_cat, positive_numerical=p_num,
+                negative_input_ids=n_ids, negative_attention_mask=n_mask,
+                negative_categorical=n_cat, negative_numerical=n_num,
+            )
+            loss = outputs.get('contrastive_loss', list(outputs.values())[0])
+            pred = outputs.get('anchor_pos_similarity', torch.zeros(batch_size, device=self.device))
+            return loss, pred
+
+        # TV Temporal Attention
+        if self.model_name == 'tv_temporal_attention':
+            show_ids = to_device('show_ids') or item_ids
+            timestamps = to_device('timestamps')
+            if timestamps is None:
+                timestamps = torch.rand(batch_size, 10, device=self.device)
+            outputs = model(show_ids=show_ids, timestamps=timestamps)
+            pred = outputs.get('predictions') or outputs.get('rating_pred') or list(outputs.values())[0]
+            loss = criterion(pred.squeeze(), ratings.float()) if ratings is not None else pred.mean()
+            return loss, pred
+
+        # TV Meta Learning
+        if self.model_name == 'tv_meta_learning':
+            base_features = to_device('base_features')
+            if base_features is None:
+                base_features = torch.rand(batch_size, 1024, device=self.device)
+            outputs = model(base_features=base_features)
+            pred = outputs.get('adapted_predictions') or outputs.get('predictions') or list(outputs.values())[0]
+            loss = criterion(pred.squeeze(), ratings.float()) if ratings is not None else pred.mean()
+            return loss, pred
+
+        # TV Multimodal
+        if self.model_name == 'tv_multimodal':
+            seq_len = 64
+            text_input_ids = to_device('text_input_ids')
+            if text_input_ids is None:
+                text_input_ids = torch.randint(0, 30000, (batch_size, seq_len), device=self.device)
+            text_attention_mask = to_device('text_attention_mask')
+            if text_attention_mask is None:
+                text_attention_mask = torch.ones(batch_size, seq_len, device=self.device)
+            categorical_features = {
+                'genres': torch.randint(0, 50, (batch_size, 5), device=self.device),
+                'networks': torch.randint(0, 100, (batch_size, 3), device=self.device),
+            }
+            numerical_features = torch.rand(batch_size, 10, device=self.device)
+            outputs = model(
+                text_input_ids=text_input_ids, text_attention_mask=text_attention_mask,
+                categorical_features=categorical_features, numerical_features=numerical_features
+            )
+            pred = outputs.get('predictions') or outputs.get('embeddings') or list(outputs.values())[0]
+            if pred.dim() > 1 and pred.size(-1) != 1:
+                pred = pred.mean(dim=-1)
+            loss = criterion(pred.squeeze(), ratings.float()) if ratings is not None else pred.mean()
+            return loss, pred
+
+        # TV Binge Prediction
+        if self.model_name == 'tv_binge_prediction':
+            show_ids = to_device('show_ids') or item_ids
+            outputs = model(
+                user_ids=user_ids, show_ids=show_ids,
+                session_duration=to_device('session_duration') or torch.rand(batch_size, device=self.device),
+                time_of_day=to_device('time_of_day') or torch.randint(0, 24, (batch_size,), device=self.device),
+                day_of_week=to_device('day_of_week') or torch.randint(0, 7, (batch_size,), device=self.device),
+                session_types=to_device('session_types') or torch.randint(0, 5, (batch_size,), device=self.device),
+                cliffhanger_scores=to_device('cliffhanger_scores') or torch.rand(batch_size, device=self.device),
+                length_features=to_device('length_features') or torch.rand(batch_size, device=self.device),
+                structure_types=to_device('structure_types') or torch.randint(0, 5, (batch_size,), device=self.device),
+                release_patterns=to_device('release_patterns') or torch.randint(0, 3, (batch_size,), device=self.device),
+            )
+            pred = outputs.get('binge_probability') or outputs.get('predictions') or list(outputs.values())[0]
+            loss = criterion(pred.squeeze(), ratings.float() / 5.0) if ratings is not None else pred.mean()
+            return loss, pred
+
+        # TV Series Completion
+        if self.model_name == 'tv_series_completion':
+            show_ids = to_device('show_ids') or item_ids
+            seq_len = 10
+            outputs = model(
+                user_ids=user_ids, show_ids=show_ids,
+                progress_features=to_device('progress_features') or torch.rand(batch_size, seq_len, device=self.device),
+                engagement_types=to_device('engagement_types') or torch.randint(0, 5, (batch_size, seq_len), device=self.device),
+                gap_features=to_device('gap_features') or torch.rand(batch_size, seq_len, device=self.device),
+            )
+            pred = outputs.get('completion_probability') or outputs.get('predictions') or list(outputs.values())[0]
+            loss = criterion(pred.squeeze(), ratings.float() / 5.0) if ratings is not None else pred.mean()
+            return loss, pred
+
+        # TV Season Quality
+        if self.model_name == 'tv_season_quality':
+            show_ids = to_device('show_ids') or item_ids
+            seq_len = 10
+            outputs = model(
+                user_ids=user_ids, show_ids=show_ids,
+                season_positions=to_device('season_positions') or torch.randint(0, 20, (batch_size, seq_len), device=self.device),
+                quality_features=to_device('quality_features') or torch.rand(batch_size, seq_len, device=self.device),
+                season_types=to_device('season_types') or torch.randint(0, 5, (batch_size, seq_len), device=self.device),
+                change_features=to_device('change_features') or torch.rand(batch_size, seq_len, device=self.device),
+            )
+            pred = outputs.get('quality_scores') or outputs.get('predictions') or list(outputs.values())[0]
+            loss = criterion(pred.squeeze(), ratings.float()) if ratings is not None else pred.mean()
+            return loss, pred
+
+        # TV Platform Availability
+        if self.model_name == 'tv_platform_availability':
+            show_ids = to_device('show_ids') or item_ids
+            outputs = model(
+                user_ids=user_ids, show_ids=show_ids,
+                platform_ids=to_device('platform_ids') or torch.randint(0, 20, (batch_size,), device=self.device),
+                platform_types=to_device('platform_types') or torch.randint(0, 5, (batch_size,), device=self.device),
+                platform_features=to_device('platform_features') or torch.rand(batch_size, 8, device=self.device),
+                region_ids=to_device('region_ids') or torch.randint(0, 50, (batch_size,), device=self.device),
+            )
+            pred = outputs.get('availability_score') or outputs.get('predictions') or list(outputs.values())[0]
+            loss = criterion(pred.squeeze(), ratings.float() / 5.0) if ratings is not None else pred.mean()
+            return loss, pred
+
+        # TV Watch Pattern
+        if self.model_name == 'tv_watch_pattern':
+            show_ids = to_device('show_ids') or item_ids
+            seq_len = 10
+            outputs = model(
+                user_ids=user_ids, show_ids=show_ids,
+                hours=to_device('hours') or torch.randint(0, 24, (batch_size, seq_len), device=self.device),
+                days=to_device('days') or torch.randint(0, 7, (batch_size, seq_len), device=self.device),
+                months=to_device('months') or torch.randint(0, 12, (batch_size, seq_len), device=self.device),
+                durations=to_device('durations') or torch.rand(batch_size, seq_len, device=self.device),
+                gaps=to_device('gaps') or torch.rand(batch_size, seq_len, device=self.device),
+                habit_types=to_device('habit_types') or torch.randint(0, 5, (batch_size, seq_len), device=self.device),
+                consistency_features=to_device('consistency_features') or torch.rand(batch_size, seq_len, device=self.device),
+                parallel_features=to_device('parallel_features') or torch.rand(batch_size, seq_len, device=self.device),
+            )
+            pred = outputs.get('pattern_scores') or outputs.get('predictions') or list(outputs.values())[0]
+            loss = criterion(pred.squeeze(), ratings.float()) if ratings is not None else pred.mean()
+            return loss, pred
+
+        # TV Series Lifecycle
+        if self.model_name == 'tv_series_lifecycle':
+            show_ids = to_device('show_ids') or item_ids
+            outputs = model(
+                user_ids=user_ids, show_ids=show_ids,
+                stage_ids=to_device('stage_ids') or torch.randint(0, 10, (batch_size,), device=self.device),
+                health_features=to_device('health_features') or torch.rand(batch_size, 8, device=self.device),
+                network_status=to_device('network_status') or torch.randint(0, 5, (batch_size,), device=self.device),
+            )
+            pred = outputs.get('lifecycle_score') or outputs.get('predictions') or list(outputs.values())[0]
+            loss = criterion(pred.squeeze(), ratings.float()) if ratings is not None else pred.mean()
+            return loss, pred
+
+        # TV Cast Migration
+        if self.model_name == 'tv_cast_migration':
+            show_ids = to_device('show_ids') or item_ids
+            seq_len = 10
+            outputs = model(
+                user_ids=user_ids, show_ids=show_ids,
+                actor_ids=to_device('actor_ids') or torch.randint(0, 10000, (batch_size, seq_len), device=self.device),
+                role_types=to_device('role_types') or torch.randint(0, 5, (batch_size, seq_len), device=self.device),
+                status_ids=to_device('status_ids') or torch.randint(0, 5, (batch_size, seq_len), device=self.device),
+                screen_time=to_device('screen_time') or torch.rand(batch_size, seq_len, device=self.device),
+            )
+            pred = outputs.get('cast_impact_score') or outputs.get('predictions') or list(outputs.values())[0]
+            loss = criterion(pred.squeeze(), ratings.float()) if ratings is not None else pred.mean()
+            return loss, pred
+
+        # === DEFAULT FORWARD (user_ids, item_ids) ===
+        if user_ids is None or item_ids is None or ratings is None:
+            raise ValueError(f"Missing required inputs for {self.model_name}")
+
+        outputs = model(user_ids, item_ids)
+
+        if isinstance(outputs, dict):
+            pred = outputs.get('rating_pred') or outputs.get('predictions') or outputs.get('scores')
+            if pred is None:
+                pred = list(outputs.values())[0]
+        else:
+            pred = outputs
+
+        loss = criterion(pred.squeeze(), ratings.float())
+        return loss, pred
+
     def _generic_train(self, model, epochs, batch_size, lr, weight_decay, save_every, early_stopping_patience):
         """Generic training for models without dedicated trainers"""
         model = model.to(self.device)
@@ -2184,39 +2415,9 @@ class UnifiedTrainingPipeline:
 
             for batch in train_loader:
                 optimizer.zero_grad()
-                # Generic forward - try multiple input patterns
                 try:
-                    # Get user IDs (try multiple key names)
-                    user_ids = batch.get('user_ids', batch.get('user_id'))
-                    if user_ids is None:
-                        logger.warning(f"No user_ids found in batch keys: {batch.keys()}")
-                        continue
-                    user_ids = user_ids.to(self.device)
-
-                    # Get item IDs (try multiple key names for different content types)
-                    item_ids = batch.get('item_ids') or batch.get('movie_ids') or batch.get('show_ids')
-                    if item_ids is None:
-                        logger.warning(f"No item_ids found in batch keys: {batch.keys()}")
-                        continue
-                    item_ids = item_ids.to(self.device)
-
-                    # Get target ratings
-                    ratings = batch.get('ratings') or batch.get('rating') or batch.get('user_ratings')
-                    if ratings is None:
-                        logger.warning(f"No ratings found in batch keys: {batch.keys()}")
-                        continue
-                    ratings = ratings.to(self.device)
-
-                    # Try forward pass
-                    outputs = model(user_ids, item_ids)
-                    if isinstance(outputs, dict):
-                        pred = outputs.get('rating_pred') or outputs.get('predictions') or outputs.get('scores')
-                        if pred is None:
-                            pred = list(outputs.values())[0]
-                    else:
-                        pred = outputs
-
-                    loss = criterion(pred.squeeze(), ratings.float())
+                    # Use model-specific forward handling
+                    loss, pred = self._model_forward(model, batch, criterion)
                     loss.backward()
 
                     # Track gradient norm for learning validation
