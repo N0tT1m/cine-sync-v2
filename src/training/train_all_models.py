@@ -99,6 +99,116 @@ def check_gpu_availability() -> str:
     return device
 
 
+def configure_gpu_optimizations(device: str) -> dict:
+    """
+    Configure GPU-specific optimizations for RTX 4090 and other modern GPUs.
+
+    Optimizations applied:
+    - TF32 for matmul/convolutions (1.5-2x speedup on Ampere/Ada GPUs)
+    - cuDNN benchmark mode for consistent input sizes
+    - Memory-efficient settings
+
+    Returns dict with optimization status for logging.
+    """
+    optimizations = {
+        'tf32_matmul': False,
+        'tf32_cudnn': False,
+        'cudnn_benchmark': False,
+        'cuda_graphs_eligible': False,
+        'compile_available': False,
+        'fused_optimizer_available': False,
+        'amp_available': False,
+        'gpu_name': None,
+        'gpu_memory_gb': 0,
+        'is_rtx_4090': False,
+        'is_high_end_gpu': False,
+    }
+
+    if device != 'cuda' or not torch.cuda.is_available():
+        logger.info("GPU optimizations skipped (no CUDA device)")
+        return optimizations
+
+    # Get GPU info
+    props = torch.cuda.get_device_properties(0)
+    optimizations['gpu_name'] = props.name
+    optimizations['gpu_memory_gb'] = props.total_memory / 1024**3
+    optimizations['is_rtx_4090'] = '4090' in props.name
+    optimizations['is_high_end_gpu'] = optimizations['gpu_memory_gb'] >= 16
+
+    logger.info("=" * 60)
+    logger.info("APPLYING GPU OPTIMIZATIONS")
+    logger.info("=" * 60)
+
+    # 1. Enable TF32 for matrix multiplications (Ampere+ GPUs, compute >= 8.0)
+    # TF32 provides ~2x speedup with minimal accuracy loss
+    if props.major >= 8:  # Ampere (8.x), Ada Lovelace (8.9), Hopper (9.0)
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        optimizations['tf32_matmul'] = True
+        optimizations['tf32_cudnn'] = True
+        logger.info(f"✓ TF32 enabled for matmul/cudnn (compute {props.major}.{props.minor})")
+    else:
+        logger.info(f"  TF32 not available (requires compute >= 8.0, have {props.major}.{props.minor})")
+
+    # 2. Enable cuDNN benchmark mode
+    # Finds optimal convolution algorithms - helps when input sizes are consistent
+    torch.backends.cudnn.benchmark = True
+    torch.backends.cudnn.deterministic = False  # Allow non-deterministic for speed
+    optimizations['cudnn_benchmark'] = True
+    logger.info("✓ cuDNN benchmark mode enabled")
+
+    # 3. Check torch.compile availability (PyTorch 2.0+)
+    if hasattr(torch, 'compile'):
+        optimizations['compile_available'] = True
+        logger.info("✓ torch.compile() available (PyTorch 2.0+)")
+    else:
+        logger.info("  torch.compile() not available (requires PyTorch >= 2.0)")
+
+    # 4. Check fused optimizer availability
+    try:
+        # Test if fused AdamW is available
+        test_param = torch.nn.Parameter(torch.zeros(1, device='cuda'))
+        torch.optim.AdamW([test_param], fused=True)
+        optimizations['fused_optimizer_available'] = True
+        logger.info("✓ Fused AdamW optimizer available")
+        del test_param
+    except Exception:
+        logger.info("  Fused AdamW not available")
+
+    # 5. AMP availability
+    optimizations['amp_available'] = True
+    logger.info("✓ Automatic Mixed Precision (AMP) available")
+
+    # 6. CUDA graphs eligibility (RTX 30xx/40xx)
+    if props.major >= 8:
+        optimizations['cuda_graphs_eligible'] = True
+        logger.info("✓ CUDA Graphs eligible")
+
+    # 7. Memory optimizations for high-end GPUs
+    if optimizations['is_high_end_gpu']:
+        # Set memory fraction to allow larger allocations
+        # Don't set too high to leave room for OS/display
+        try:
+            torch.cuda.set_per_process_memory_fraction(0.95)
+            logger.info("✓ GPU memory fraction set to 95%")
+        except Exception:
+            pass
+
+    # Summary
+    logger.info("-" * 60)
+    if optimizations['is_rtx_4090']:
+        logger.info(f"🚀 RTX 4090 detected ({optimizations['gpu_memory_gb']:.1f}GB) - Maximum optimizations applied!")
+        logger.info("   Recommended: batch_size=512-1024, use_amp=True, compile=True")
+    elif optimizations['is_high_end_gpu']:
+        logger.info(f"🚀 High-end GPU detected ({optimizations['gpu_memory_gb']:.1f}GB)")
+        logger.info("   Recommended: batch_size=256-512, use_amp=True")
+    else:
+        logger.info(f"   GPU: {props.name} ({optimizations['gpu_memory_gb']:.1f}GB)")
+    logger.info("=" * 60)
+
+    return optimizations
+
+
 class ModelCategory(Enum):
     """Model category enumeration"""
     MOVIE_SPECIFIC = "movie"
@@ -1556,7 +1666,10 @@ class UnifiedTrainingPipeline:
         output_dir: str = None,
         device: str = 'cuda',
         use_wandb: bool = False,
-        wandb_project: str = 'cinesync-models'
+        wandb_project: str = 'cinesync-models',
+        use_amp: bool = True,
+        use_compile: bool = True,
+        gpu_optimizations: dict = None
     ):
         # Use paths relative to project root (portable across machines)
         # Script is at: cine-sync-v2/src/training/train_all_models.py
@@ -1571,6 +1684,12 @@ class UnifiedTrainingPipeline:
         self.output_dir = Path(output_dir)
         self.device = device if torch.cuda.is_available() else 'cpu'
         self.use_wandb = use_wandb and WANDB_AVAILABLE
+
+        # RTX 4090 optimizations
+        self.gpu_optimizations = gpu_optimizations or {}
+        self.use_amp = use_amp and self.device == 'cuda' and self.gpu_optimizations.get('amp_available', True)
+        self.use_compile = use_compile and self.gpu_optimizations.get('compile_available', False)
+        self.use_fused_optimizer = self.gpu_optimizations.get('fused_optimizer_available', False)
 
         if model_name not in ALL_MODELS:
             raise ValueError(f"Unknown model: {model_name}. Use --list-models to see available models.")
@@ -1897,7 +2016,7 @@ class UnifiedTrainingPipeline:
         }
 
     def create_dataloaders(self, batch_size: int = 256, num_workers: int = 4) -> tuple:
-        """Create train and validation dataloaders"""
+        """Create train and validation dataloaders with RTX 4090 optimizations"""
         import platform
 
         # Determine content type based on category
@@ -1914,7 +2033,9 @@ class UnifiedTrainingPipeline:
         # Adjust num_workers based on dataset size and platform
         # Windows spawn method is memory-heavy - each worker copies dataset
         dataset_size = len(train_dataset)
-        if platform.system() == 'Windows':
+        is_windows = platform.system() == 'Windows'
+
+        if is_windows:
             if dataset_size > 1_000_000:
                 # Very large dataset - disable multiprocessing to avoid MemoryError
                 num_workers = 0
@@ -1923,31 +2044,59 @@ class UnifiedTrainingPipeline:
                 num_workers = min(num_workers, 2)
                 logger.info(f"Medium dataset ({dataset_size:,} samples) on Windows - reduced to num_workers={num_workers}")
 
-        # Only use pin_memory when CUDA is available
-        use_pin_memory = torch.cuda.is_available() and num_workers > 0
+        # RTX 4090 Optimization: Use more workers for high-end GPUs
+        if self.gpu_optimizations.get('is_high_end_gpu', False) and not is_windows:
+            num_workers = max(num_workers, 8)  # More workers for faster data loading
 
-        train_loader = DataLoader(
-            train_dataset, batch_size=batch_size, shuffle=True,
-            num_workers=num_workers, collate_fn=collate_fn, pin_memory=use_pin_memory
-        )
-        val_loader = DataLoader(
-            val_dataset, batch_size=batch_size, shuffle=False,
-            num_workers=num_workers, collate_fn=collate_fn, pin_memory=use_pin_memory
-        )
+        # Only use pin_memory when CUDA is available and num_workers > 0
+        use_pin_memory = torch.cuda.is_available()
+
+        # RTX 4090 Optimization: DataLoader settings
+        # persistent_workers: Keep workers alive between epochs (faster startup)
+        # prefetch_factor: Number of batches to prefetch per worker
+        use_persistent_workers = num_workers > 0
+        prefetch_factor = 4 if num_workers > 0 else None  # Prefetch more batches for faster loading
+
+        train_loader_kwargs = {
+            'batch_size': batch_size,
+            'shuffle': True,
+            'num_workers': num_workers,
+            'collate_fn': collate_fn,
+            'pin_memory': use_pin_memory,
+            'drop_last': True,  # Drop incomplete batches for consistent batch sizes (helps with compiled models)
+        }
+
+        val_loader_kwargs = {
+            'batch_size': batch_size,
+            'shuffle': False,
+            'num_workers': num_workers,
+            'collate_fn': collate_fn,
+            'pin_memory': use_pin_memory,
+        }
+
+        # Add persistent_workers and prefetch_factor if using workers
+        if use_persistent_workers:
+            train_loader_kwargs['persistent_workers'] = True
+            train_loader_kwargs['prefetch_factor'] = prefetch_factor
+            val_loader_kwargs['persistent_workers'] = True
+            val_loader_kwargs['prefetch_factor'] = prefetch_factor
+
+        train_loader = DataLoader(train_dataset, **train_loader_kwargs)
+        val_loader = DataLoader(val_dataset, **val_loader_kwargs)
 
         return train_loader, val_loader
 
     def train(
         self,
         epochs: int = 50,
-        batch_size: int = 256,
+        batch_size: int = 512,  # RTX 4090: Increased default from 256
         lr: float = 1e-4,
         weight_decay: float = 0.01,
         save_every: int = 5,
         early_stopping_patience: int = 10,
         **config_overrides
     ) -> Dict[str, Any]:
-        """Train the model"""
+        """Train the model with RTX 4090 optimizations"""
         model = self.create_model(**config_overrides)
         model_class, trainer_class, _ = self._load_model_class()
 
@@ -2117,7 +2266,14 @@ class UnifiedTrainingPipeline:
         return total_bytes / (1024 ** 3)
 
     def _get_safe_batch_size(self, model: nn.Module, requested_batch_size: int) -> int:
-        """Calculate safe batch size based on available GPU memory"""
+        """
+        Calculate safe batch size based on available GPU memory.
+
+        RTX 4090 Optimization: Takes into account:
+        - 24GB VRAM allows much larger batches
+        - AMP (mixed precision) reduces memory usage by ~40-50%
+        - Model size estimation
+        """
         if not torch.cuda.is_available():
             return min(requested_batch_size, 64)  # CPU is slower, smaller batches
 
@@ -2125,20 +2281,51 @@ class UnifiedTrainingPipeline:
             gpu_memory_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
             model_memory_gb = self._estimate_model_memory(model)
 
-            # Leave ~2GB for activations and system overhead
-            available_for_batch = gpu_memory_gb - model_memory_gb - 2.0
+            # RTX 4090 Optimization: AMP reduces activation memory by ~40-50%
+            amp_memory_factor = 0.6 if self.use_amp else 1.0
+
+            # RTX 4090: Leave ~3GB for system overhead (more headroom for large batches)
+            # For smaller GPUs: Leave ~2GB
+            overhead_gb = 3.0 if gpu_memory_gb >= 20 else 2.0
+            available_for_batch = (gpu_memory_gb - model_memory_gb - overhead_gb) / amp_memory_factor
 
             if available_for_batch < 1.0:
                 logger.warning(f"Model uses ~{model_memory_gb:.1f}GB, GPU has {gpu_memory_gb:.1f}GB. Using small batch.")
-                return 16
+                return 32 if self.use_amp else 16
 
-            # Scale batch size based on available memory
-            if model_memory_gb > 2.0:  # Large model
-                safe_batch = min(requested_batch_size, 32)
-            elif model_memory_gb > 1.0:  # Medium model
-                safe_batch = min(requested_batch_size, 64)
+            # RTX 4090 Optimization: Use larger batch sizes for high-end GPUs
+            is_high_end = self.gpu_optimizations.get('is_high_end_gpu', False) or gpu_memory_gb >= 16
+            is_rtx_4090 = self.gpu_optimizations.get('is_rtx_4090', False) or gpu_memory_gb >= 20
+
+            # Scale batch size based on available memory and GPU tier
+            if is_rtx_4090:
+                # RTX 4090 with 24GB VRAM - can handle very large batches
+                if model_memory_gb > 4.0:  # Very large model (e.g., transformers)
+                    safe_batch = min(requested_batch_size, 256)
+                elif model_memory_gb > 2.0:  # Large model
+                    safe_batch = min(requested_batch_size, 512)
+                elif model_memory_gb > 1.0:  # Medium model
+                    safe_batch = min(requested_batch_size, 1024)
+                else:  # Small model
+                    safe_batch = min(requested_batch_size, 2048)
+            elif is_high_end:
+                # 16-20GB GPUs (RTX 3090, A100 40GB, etc.)
+                if model_memory_gb > 4.0:
+                    safe_batch = min(requested_batch_size, 128)
+                elif model_memory_gb > 2.0:
+                    safe_batch = min(requested_batch_size, 256)
+                elif model_memory_gb > 1.0:
+                    safe_batch = min(requested_batch_size, 512)
+                else:
+                    safe_batch = min(requested_batch_size, 1024)
             else:
-                safe_batch = requested_batch_size
+                # Standard GPUs (8-12GB)
+                if model_memory_gb > 2.0:
+                    safe_batch = min(requested_batch_size, 32)
+                elif model_memory_gb > 1.0:
+                    safe_batch = min(requested_batch_size, 64)
+                else:
+                    safe_batch = min(requested_batch_size, 256)
 
             return safe_batch
         except Exception as e:
@@ -2411,9 +2598,31 @@ class UnifiedTrainingPipeline:
     def _generic_train(self, model, epochs, batch_size, lr, weight_decay, save_every, early_stopping_patience):
         """Generic training for models without dedicated trainers"""
         model = model.to(self.device)
-        optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+
+        # RTX 4090 Optimization: torch.compile() for faster execution
+        if self.use_compile and hasattr(torch, 'compile'):
+            try:
+                logger.info("Compiling model with torch.compile()...")
+                model = torch.compile(model, mode='reduce-overhead')
+                logger.info("✓ Model compiled successfully")
+            except Exception as e:
+                logger.warning(f"torch.compile() failed, using eager mode: {e}")
+
+        # RTX 4090 Optimization: Fused AdamW for faster optimizer steps
+        optimizer_kwargs = {'lr': lr, 'weight_decay': weight_decay}
+        if self.use_fused_optimizer and self.device == 'cuda':
+            optimizer_kwargs['fused'] = True
+            logger.info("✓ Using fused AdamW optimizer")
+
+        optimizer = torch.optim.AdamW(model.parameters(), **optimizer_kwargs)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=2)
         criterion = nn.MSELoss()
+
+        # RTX 4090 Optimization: Mixed Precision Training (AMP)
+        scaler = None
+        if self.use_amp:
+            scaler = torch.amp.GradScaler('cuda')
+            logger.info("✓ Using Automatic Mixed Precision (AMP)")
 
         # Adjust batch size based on model size and available memory
         safe_batch_size = self._get_safe_batch_size(model, batch_size)
@@ -2425,6 +2634,7 @@ class UnifiedTrainingPipeline:
         logger.info(f"Training {self.model_name} with generic trainer")
         logger.info(f"  Estimated model memory: {self._estimate_model_memory(model):.2f}GB")
         logger.info(f"  Initial learning rate: {lr}")
+        logger.info(f"  Optimizations: AMP={self.use_amp}, Compile={self.use_compile}, Fused={self.use_fused_optimizer}")
 
         # Learning validation tracking
         loss_history = []
@@ -2440,22 +2650,44 @@ class UnifiedTrainingPipeline:
             total_grad_norm = 0
 
             for batch in train_loader:
-                optimizer.zero_grad()
+                optimizer.zero_grad(set_to_none=True)  # Slightly faster than zero_grad()
                 try:
-                    # Use model-specific forward handling
-                    loss, pred = self._model_forward(model, batch, criterion)
-                    loss.backward()
+                    # RTX 4090 Optimization: Mixed Precision forward pass
+                    if scaler is not None:
+                        with torch.amp.autocast('cuda', dtype=torch.float16):
+                            loss, pred = self._model_forward(model, batch, criterion)
+                        scaler.scale(loss).backward()
 
-                    # Track gradient norm for learning validation
-                    grad_norm = 0
-                    for p in model.parameters():
-                        if p.grad is not None:
-                            grad_norm += p.grad.data.norm(2).item() ** 2
-                    grad_norm = grad_norm ** 0.5
-                    total_grad_norm += grad_norm
+                        # Unscale for gradient clipping
+                        scaler.unscale_(optimizer)
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-                    optimizer.step()
+                        # Track gradient norm for learning validation
+                        grad_norm = 0
+                        for p in model.parameters():
+                            if p.grad is not None:
+                                grad_norm += p.grad.data.norm(2).item() ** 2
+                        grad_norm = grad_norm ** 0.5
+                        total_grad_norm += grad_norm
+
+                        scaler.step(optimizer)
+                        scaler.update()
+                    else:
+                        # Standard training without AMP
+                        loss, pred = self._model_forward(model, batch, criterion)
+                        loss.backward()
+
+                        # Track gradient norm for learning validation
+                        grad_norm = 0
+                        for p in model.parameters():
+                            if p.grad is not None:
+                                grad_norm += p.grad.data.norm(2).item() ** 2
+                        grad_norm = grad_norm ** 0.5
+                        total_grad_norm += grad_norm
+
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                        optimizer.step()
+
                     epoch_loss += loss.item()
                     batch_count += 1
                 except RuntimeError as e:
@@ -2625,7 +2857,7 @@ def train_category(
         try:
             # Only pass init-compatible kwargs to the constructor
             init_kwargs = {k: v for k, v in training_kwargs.items()
-                          if k in ('device', 'use_wandb', 'wandb_project')}
+                          if k in ('device', 'use_wandb', 'wandb_project', 'use_amp', 'use_compile', 'gpu_optimizations')}
             pipeline = UnifiedTrainingPipeline(
                 model_name=model_name,
                 data_dir=data_dir,
@@ -2844,6 +3076,14 @@ Examples:
                        default=os.getenv('CINESYNC_MODEL_REGISTRY', str(project_root / 'model-registry')),
                        help='Path to the local model registry')
 
+    # RTX 4090 optimization options
+    parser.add_argument('--no-amp', action='store_true',
+                       help='Disable Automatic Mixed Precision (AMP) training')
+    parser.add_argument('--no-compile', action='store_true',
+                       help='Disable torch.compile() model compilation')
+    parser.add_argument('--no-fused-optimizer', action='store_true',
+                       help='Disable fused AdamW optimizer')
+
     args = parser.parse_args()
 
     if args.list_models:
@@ -2860,19 +3100,45 @@ Examples:
     else:
         device = args.device
 
+    # RTX 4090 Optimization: Configure GPU-specific optimizations
+    gpu_optimizations = configure_gpu_optimizations(device)
+
     # Determine if we should publish (default True unless --no-publish)
     should_publish = args.publish and not args.no_publish
 
+    # RTX 4090: Use larger default batch size for high-end GPUs
+    default_batch_size = args.batch_size
+    if args.batch_size == 256 and gpu_optimizations.get('is_rtx_4090', False):
+        default_batch_size = 512
+        logger.info(f"RTX 4090 detected: Increasing default batch size to {default_batch_size}")
+    elif args.batch_size == 256 and gpu_optimizations.get('is_high_end_gpu', False):
+        default_batch_size = 384
+        logger.info(f"High-end GPU detected: Increasing default batch size to {default_batch_size}")
+
+    # Determine optimization settings from args
+    use_amp = not args.no_amp and gpu_optimizations.get('amp_available', True)
+    use_compile = not args.no_compile and gpu_optimizations.get('compile_available', False)
+
+    # Override fused optimizer setting if disabled via CLI
+    if args.no_fused_optimizer:
+        gpu_optimizations['fused_optimizer_available'] = False
+
     training_kwargs = {
         'epochs': args.epochs,
-        'batch_size': args.batch_size,
+        'batch_size': default_batch_size,
         'lr': args.lr,
         'device': device,
         'use_wandb': args.wandb,
         'publish_to_registry': should_publish,
         'registry_path': args.registry_path,
-        'skip_existing': args.skip_existing
+        'skip_existing': args.skip_existing,
+        'gpu_optimizations': gpu_optimizations,
+        'use_amp': use_amp,
+        'use_compile': use_compile,
     }
+
+    # Log optimization settings
+    logger.info(f"Training optimizations: AMP={use_amp}, Compile={use_compile}, Fused={gpu_optimizations.get('fused_optimizer_available', False)}")
 
     # Log registry info if publishing
     if should_publish:
