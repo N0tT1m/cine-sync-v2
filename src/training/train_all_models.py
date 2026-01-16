@@ -1513,10 +1513,10 @@ class UnifiedDataset(Dataset):
             'tv_platform_availability': {
                 'user_ids': {'type': 'int', 'max': 50000},
                 'show_ids': {'type': 'int', 'max': 50000},
-                'platform_ids': {'type': 'int', 'max': 50},
+                'platform_ids': {'type': 'int', 'max': 50},  # Must match PlatformConfig.num_platforms=50
                 'platform_types': {'type': 'int', 'max': 6},  # Must match nn.Embedding(6)
                 'platform_features': {'type': 'float_seq', 'seq_len': 8},
-                'region_ids': {'type': 'int', 'max': 200},
+                'region_ids': {'type': 'int', 'max': 50},  # Must match PlatformConfig.num_regions=50
                 'ratings': {'type': 'float', 'min': 1, 'max': 5},
             },
             'tv_watch_pattern': {
@@ -2914,6 +2914,22 @@ def train_category(
         except Exception as e:
             logger.error(f"Failed: {model_name} - {e}")
             results[model_name] = {'status': 'failed', 'error': str(e)}
+
+            # Reset CUDA state to recover from device-side assert failures
+            if torch.cuda.is_available():
+                try:
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+                    # Reset the CUDA context by creating a small tensor
+                    # This helps recover from device-side assert failures
+                    _ = torch.zeros(1, device='cuda')
+                except Exception as cuda_e:
+                    logger.warning(f"Failed to reset CUDA state: {cuda_e}")
+                    # If CUDA is completely broken, try to reinitialize
+                    try:
+                        torch.cuda.reset_peak_memory_stats()
+                    except:
+                        pass
 
     return results
 
