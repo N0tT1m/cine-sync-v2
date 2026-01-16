@@ -42,7 +42,7 @@ class PlatformEncoder(nn.Module):
 
         # Platform features encoder
         self.features_encoder = nn.Sequential(
-            nn.Linear(6, config.embedding_dim // 4),  # content_library_size, original_content_ratio, price, simultaneous_streams, download_support, 4k_available
+            nn.Linear(8, config.embedding_dim // 4),  # content_library_size, original_content_ratio, price, simultaneous_streams, download_support, 4k_available, ad_tier_available, hdr_support
             nn.GELU(),
             nn.Linear(config.embedding_dim // 4, config.embedding_dim // 4)
         )
