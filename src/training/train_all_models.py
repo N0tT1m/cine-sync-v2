@@ -2645,6 +2645,80 @@ class UnifiedTrainingPipeline:
                     }
                     outputs = model(**test_inputs)
                     pred = outputs.get('predictions', outputs.get('popularity_prediction', list(outputs.values())[0]))
+                elif self.model_name == 'tv_contrastive':
+                    # ContrastiveTVModel requires anchor/positive/negative triplets
+                    num_genres = 10
+                    num_numerical = 10
+                    test_inputs = {
+                        'anchor_input_ids': torch.randint(1, 30000, (batch_size, seq_len), device=self.device),
+                        'anchor_attention_mask': torch.ones((batch_size, seq_len), dtype=torch.long, device=self.device),
+                        'anchor_categorical': {'genres': torch.randint(0, 50, (batch_size, num_genres), device=self.device)},
+                        'anchor_numerical': torch.randn(batch_size, num_numerical, device=self.device),
+                        'positive_input_ids': torch.randint(1, 30000, (batch_size, seq_len), device=self.device),
+                        'positive_attention_mask': torch.ones((batch_size, seq_len), dtype=torch.long, device=self.device),
+                        'positive_categorical': {'genres': torch.randint(0, 50, (batch_size, num_genres), device=self.device)},
+                        'positive_numerical': torch.randn(batch_size, num_numerical, device=self.device),
+                        'negative_input_ids': torch.randint(1, 30000, (batch_size, seq_len), device=self.device),
+                        'negative_attention_mask': torch.ones((batch_size, seq_len), dtype=torch.long, device=self.device),
+                        'negative_categorical': {'genres': torch.randint(0, 50, (batch_size, num_genres), device=self.device)},
+                        'negative_numerical': torch.randn(batch_size, num_numerical, device=self.device),
+                    }
+                    outputs = model(**test_inputs)
+                    pred = outputs.get('contrastive_loss', outputs.get('anchor_embedding', list(outputs.values())[0]))
+                elif self.model_name == 'tv_multimodal':
+                    # MultimodalTransformerTV requires text + metadata features
+                    num_genres = 10
+                    num_numerical = 10
+                    test_inputs = {
+                        'text_input_ids': torch.randint(1, 30000, (batch_size, seq_len), device=self.device),
+                        'text_attention_mask': torch.ones((batch_size, seq_len), dtype=torch.long, device=self.device),
+                        'categorical_features': {'genres': torch.randint(0, 50, (batch_size, num_genres), device=self.device)},
+                        'numerical_features': torch.randn(batch_size, num_numerical, device=self.device),
+                    }
+                    outputs = model(**test_inputs)
+                    pred = outputs.get('query_embedding', outputs.get('recommendation_score', list(outputs.values())[0]))
+                elif self.model_name == 'tv_graph_neural':
+                    # TVGraphRecommender requires graph structure
+                    num_shows = 100
+                    num_actors = 200
+                    num_edges = 500
+                    test_inputs = {
+                        'x_dict': {
+                            'show': torch.randint(0, num_shows, (num_shows,), device=self.device),
+                            'actor': torch.randint(0, num_actors, (num_actors,), device=self.device),
+                            'genre': torch.randint(0, 50, (50,), device=self.device),
+                            'network': torch.randint(0, 100, (100,), device=self.device),
+                            'creator': torch.randint(0, 1000, (1000,), device=self.device),
+                        },
+                        'edge_index_dict': {
+                            ('show', 'has_actor', 'actor'): torch.stack([
+                                torch.randint(0, num_shows, (num_edges,), device=self.device),
+                                torch.randint(0, num_actors, (num_edges,), device=self.device)
+                            ]),
+                            ('show', 'has_genre', 'genre'): torch.stack([
+                                torch.randint(0, num_shows, (num_edges,), device=self.device),
+                                torch.randint(0, 50, (num_edges,), device=self.device)
+                            ]),
+                            ('show', 'on_network', 'network'): torch.stack([
+                                torch.randint(0, num_shows, (num_edges,), device=self.device),
+                                torch.randint(0, 100, (num_edges,), device=self.device)
+                            ]),
+                            ('show', 'created_by', 'creator'): torch.stack([
+                                torch.randint(0, num_shows, (num_edges,), device=self.device),
+                                torch.randint(0, 1000, (num_edges,), device=self.device)
+                            ]),
+                            ('actor', 'acted_with', 'actor'): torch.stack([
+                                torch.randint(0, num_actors, (num_edges,), device=self.device),
+                                torch.randint(0, num_actors, (num_edges,), device=self.device)
+                            ]),
+                            ('show', 'similar_to', 'show'): torch.stack([
+                                torch.randint(0, num_shows, (num_edges,), device=self.device),
+                                torch.randint(0, num_shows, (num_edges,), device=self.device)
+                            ]),
+                        },
+                    }
+                    outputs = model(**test_inputs)
+                    pred = outputs.get('show_embeddings', list(outputs.values())[0])
                 else:
                     # Generic check for user/item models
                     user_ids = torch.randint(0, 1000, (batch_size,), device=self.device)
