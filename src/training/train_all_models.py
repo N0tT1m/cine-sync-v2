@@ -1801,7 +1801,7 @@ class UnifiedTrainingPipeline:
                 'tv_multimodal',
                 'src.models.hybrid.sota_tv.models.multimodal_transformer',
                 'MultimodalTransformerTV',
-                {'vocab_sizes': {'shows': 50000, 'genres': 50, 'networks': 100}, 'num_shows': 50000}
+                {'vocab_sizes': {'genres': 50, 'networks': 100}, 'num_shows': 50000}
             ),
             'gnn': (
                 'tv_graph_neural',
@@ -1813,7 +1813,7 @@ class UnifiedTrainingPipeline:
                 'tv_contrastive',
                 'src.models.hybrid.sota_tv.models.contrastive_learning',
                 'ContrastiveTVModel',
-                {'vocab_sizes': {'shows': 50000, 'genres': 50, 'networks': 100}, 'embed_dim': 768}
+                {'vocab_sizes': {'genres': 50, 'networks': 100}, 'embed_dim': 768}
             ),
         }
 
@@ -1964,7 +1964,7 @@ class UnifiedTrainingPipeline:
                 'num_creators': 20000,
             },
             'tv_contrastive': {
-                'vocab_sizes': {'shows': 50000, 'genres': 50, 'networks': 100},
+                'vocab_sizes': {'genres': 50, 'networks': 100},
                 'embed_dim': 768,
             },
             'tv_meta_learning': {
@@ -1976,7 +1976,7 @@ class UnifiedTrainingPipeline:
                 '_skip': True,
             },
             'tv_multimodal': {
-                'vocab_sizes': {'shows': 50000, 'genres': 50, 'networks': 100},
+                'vocab_sizes': {'genres': 50, 'networks': 100},
                 'num_shows': 50000,
             },
             # Unified models
@@ -2627,6 +2627,68 @@ class UnifiedTrainingPipeline:
         loss = criterion(pred.squeeze(), ratings.float())
         return loss, pred
 
+    def _run_sanity_check(self, model, epoch: int) -> Dict[str, Any]:
+        """Run quick sanity checks on the model during training"""
+        results = {'epoch': epoch, 'passed': True, 'issues': []}
+
+        model.eval()
+        try:
+            # Create dummy inputs based on model type
+            batch_size = 8
+            seq_len = 20
+
+            with torch.no_grad():
+                if self.model_name == 'tv_temporal_attention':
+                    test_inputs = {
+                        'show_ids': torch.randint(1, 10000, (batch_size, seq_len), device=self.device),
+                        'timestamps': torch.randint(1609459200, 1704067200, (batch_size, seq_len), device=self.device).float(),
+                    }
+                    outputs = model(**test_inputs)
+                    pred = outputs.get('predictions', outputs.get('popularity_prediction', list(outputs.values())[0]))
+                else:
+                    # Generic check for user/item models
+                    user_ids = torch.randint(0, 1000, (batch_size,), device=self.device)
+                    item_ids = torch.randint(0, 1000, (batch_size,), device=self.device)
+                    outputs = model(user_ids, item_ids)
+                    if isinstance(outputs, dict):
+                        pred = outputs.get('predictions', outputs.get('rating_pred', list(outputs.values())[0]))
+                    else:
+                        pred = outputs
+
+                # Check 1: NaN in outputs
+                if torch.isnan(pred).any():
+                    results['passed'] = False
+                    results['issues'].append("Model outputs contain NaN")
+
+                # Check 2: Inf in outputs
+                if torch.isinf(pred).any():
+                    results['passed'] = False
+                    results['issues'].append("Model outputs contain Inf")
+
+                # Check 3: All outputs identical (model collapsed)
+                if pred.numel() > 1 and pred.std() < 1e-7:
+                    results['passed'] = False
+                    results['issues'].append(f"All outputs identical (std={pred.std().item():.2e})")
+
+                # Check 4: Outputs in reasonable range
+                pred_min, pred_max = pred.min().item(), pred.max().item()
+                if pred_min < -100 or pred_max > 100:
+                    results['issues'].append(f"Outputs outside reasonable range: [{pred_min:.2f}, {pred_max:.2f}]")
+
+                results['stats'] = {
+                    'pred_min': pred_min,
+                    'pred_max': pred_max,
+                    'pred_mean': pred.mean().item(),
+                    'pred_std': pred.std().item()
+                }
+
+        except Exception as e:
+            results['passed'] = False
+            results['issues'].append(f"Sanity check failed: {str(e)}")
+
+        model.train()
+        return results
+
     def _generic_train(self, model, epochs, batch_size, lr, weight_decay, save_every, early_stopping_patience):
         """Generic training for models without dedicated trainers"""
         model = model.to(self.device)
@@ -2807,6 +2869,24 @@ class UnifiedTrainingPipeline:
                 self._save_checkpoint(model, epoch + 1, {'loss': epoch_loss})
 
             logger.info(f"Epoch {epoch+1}/{epochs} - Loss: {avg_loss:.4f} | LR: {current_lr:.2e} | GradNorm: {avg_grad_norm:.2e}")
+
+            # Run sanity check every 5 epochs and on first epoch
+            if epoch == 0 or (epoch + 1) % 5 == 0:
+                sanity_result = self._run_sanity_check(model, epoch + 1)
+                if sanity_result['passed']:
+                    stats = sanity_result.get('stats', {})
+                    logger.info(f"  ✓ Sanity check passed: pred_range=[{stats.get('pred_min', 0):.3f}, {stats.get('pred_max', 0):.3f}], std={stats.get('pred_std', 0):.3f}")
+                else:
+                    logger.warning(f"  ⚠️ Sanity check FAILED: {sanity_result['issues']}")
+                    if 'NaN' in str(sanity_result['issues']) or 'Inf' in str(sanity_result['issues']):
+                        logger.error("  Model producing invalid outputs - consider stopping training")
+                        return {
+                            'model_name': self.model_name,
+                            'epochs_trained': epoch + 1,
+                            'status': 'failed',
+                            'reason': 'sanity_check_failed',
+                            'issues': sanity_result['issues']
+                        }
 
         # Final learning validation summary
         total_improvement = initial_loss - loss_history[-1] if loss_history else 0
