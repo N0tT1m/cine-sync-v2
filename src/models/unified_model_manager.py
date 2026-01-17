@@ -453,12 +453,12 @@ class UnifiedModelManager:
             "variational_autoencoder": {"num_items": 10000, "hidden_dim": 256, "latent_dim": 64},
             "unified_recommender": {"num_users": 100000, "num_items": 50000, "embedding_dim": 64},
             # TV models
-            "tv_temporal_attention": {"num_shows": 10000, "embedding_dim": 128},
+            "tv_temporal_attention": {"vocab_sizes": {"shows": 10000, "genres": 50, "networks": 100}, "d_model": 512},
             "tv_graph_recommender": {"num_users": 100000, "num_shows": 10000, "embedding_dim": 128},
-            "tv_contrastive": {"num_shows": 10000, "embedding_dim": 128},
+            "tv_contrastive": {"vocab_sizes": {"genres": 50, "networks": 100}, "embed_dim": 768},
             "tv_ensemble": {"num_users": 100000, "num_shows": 10000},
             "tv_meta_learning": {"embedding_dim": 128, "num_genres": 20},
-            "tv_multimodal": {"num_shows": 10000, "embedding_dim": 128},
+            "tv_multimodal": {"vocab_sizes": {"genres": 50, "networks": 100}, "num_shows": 10000},
         }
 
         params = default_params.get(model_name, {})
