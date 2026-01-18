@@ -2647,20 +2647,31 @@ class UnifiedTrainingPipeline:
                     pred = outputs.get('predictions', outputs.get('popularity_prediction', list(outputs.values())[0]))
                 elif self.model_name == 'tv_contrastive':
                     # ContrastiveTVModel requires anchor/positive/negative triplets
+                    # Must match vocab_sizes used in model creation: {'genres': 50, 'networks': 100}
                     num_genres = 10
+                    num_networks = 5
                     num_numerical = 10
                     test_inputs = {
                         'anchor_input_ids': torch.randint(1, 30000, (batch_size, seq_len), device=self.device),
                         'anchor_attention_mask': torch.ones((batch_size, seq_len), dtype=torch.long, device=self.device),
-                        'anchor_categorical': {'genres': torch.randint(0, 50, (batch_size, num_genres), device=self.device)},
+                        'anchor_categorical': {
+                            'genres': torch.randint(0, 50, (batch_size, num_genres), device=self.device),
+                            'networks': torch.randint(0, 100, (batch_size, num_networks), device=self.device),
+                        },
                         'anchor_numerical': torch.randn(batch_size, num_numerical, device=self.device),
                         'positive_input_ids': torch.randint(1, 30000, (batch_size, seq_len), device=self.device),
                         'positive_attention_mask': torch.ones((batch_size, seq_len), dtype=torch.long, device=self.device),
-                        'positive_categorical': {'genres': torch.randint(0, 50, (batch_size, num_genres), device=self.device)},
+                        'positive_categorical': {
+                            'genres': torch.randint(0, 50, (batch_size, num_genres), device=self.device),
+                            'networks': torch.randint(0, 100, (batch_size, num_networks), device=self.device),
+                        },
                         'positive_numerical': torch.randn(batch_size, num_numerical, device=self.device),
                         'negative_input_ids': torch.randint(1, 30000, (batch_size, seq_len), device=self.device),
                         'negative_attention_mask': torch.ones((batch_size, seq_len), dtype=torch.long, device=self.device),
-                        'negative_categorical': {'genres': torch.randint(0, 50, (batch_size, num_genres), device=self.device)},
+                        'negative_categorical': {
+                            'genres': torch.randint(0, 50, (batch_size, num_genres), device=self.device),
+                            'networks': torch.randint(0, 100, (batch_size, num_networks), device=self.device),
+                        },
                         'negative_numerical': torch.randn(batch_size, num_numerical, device=self.device),
                     }
                     outputs = model(**test_inputs)
