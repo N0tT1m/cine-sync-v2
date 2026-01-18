@@ -109,7 +109,7 @@ class TVEncoder(nn.Module):
         
         # Text encoder
         if use_pretrained_text:
-            self.text_encoder = RobertaModel.from_pretrained('roberta-base')
+            self.text_encoder = RobertaModel.from_pretrained('roberta-base', add_pooling_layer=False)
             # Freeze some layers to reduce memory
             for param in self.text_encoder.embeddings.parameters():
                 param.requires_grad = False
