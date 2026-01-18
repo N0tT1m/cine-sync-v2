@@ -2769,6 +2769,7 @@ class UnifiedTrainingPipeline:
 
         # RTX 4090 Optimization: torch.compile() for faster execution
         # Skip on Windows as Triton is not supported
+        actually_compiled = False
         if self.use_compile and hasattr(torch, 'compile'):
             if platform.system() == 'Windows':
                 logger.info("Skipping torch.compile() on Windows (Triton not supported)")
@@ -2777,6 +2778,7 @@ class UnifiedTrainingPipeline:
                     logger.info("Compiling model with torch.compile()...")
                     model = torch.compile(model, mode='reduce-overhead')
                     logger.info("✓ Model compiled successfully")
+                    actually_compiled = True
                 except Exception as e:
                     logger.warning(f"torch.compile() failed, using eager mode: {e}")
 
@@ -2806,7 +2808,7 @@ class UnifiedTrainingPipeline:
         logger.info(f"Training {self.model_name} with generic trainer")
         logger.info(f"  Estimated model memory: {self._estimate_model_memory(model):.2f}GB")
         logger.info(f"  Initial learning rate: {lr}")
-        logger.info(f"  Optimizations: AMP={self.use_amp}, Compile={self.use_compile}, Fused={self.use_fused_optimizer}")
+        logger.info(f"  Optimizations: AMP={self.use_amp}, Compile={actually_compiled}, Fused={self.use_fused_optimizer}")
 
         # Learning validation tracking
         loss_history = []
