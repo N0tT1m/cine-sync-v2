@@ -2675,7 +2675,15 @@ class UnifiedTrainingPipeline:
                         'negative_numerical': torch.randn(batch_size, num_numerical, device=self.device),
                     }
                     outputs = model(**test_inputs)
-                    pred = outputs.get('contrastive_loss', outputs.get('anchor_embedding', list(outputs.values())[0]))
+                    # For contrastive models, use embeddings for sanity checks, not the scalar loss
+                    # Also capture similarity scores for meaningful statistics
+                    pred = outputs.get('anchor_embedding', outputs.get('projected_anchor', list(outputs.values())[0]))
+                    # Store additional contrastive-specific stats
+                    self._contrastive_outputs = {
+                        'anchor_pos_similarity': outputs.get('anchor_pos_similarity'),
+                        'anchor_neg_similarity': outputs.get('anchor_neg_similarity'),
+                        'contrastive_loss': outputs.get('contrastive_loss'),
+                    }
                 elif self.model_name == 'tv_multimodal':
                     # MultimodalTransformerTV requires text + metadata features
                     num_genres = 10
@@ -2760,12 +2768,27 @@ class UnifiedTrainingPipeline:
                 if pred_min < -100 or pred_max > 100:
                     results['issues'].append(f"Outputs outside reasonable range: [{pred_min:.2f}, {pred_max:.2f}]")
 
-                results['stats'] = {
-                    'pred_min': pred_min,
-                    'pred_max': pred_max,
-                    'pred_mean': pred.mean().item(),
-                    'pred_std': pred.std().item()
-                }
+                # Build stats dict based on model type
+                if self.model_name == 'tv_contrastive' and hasattr(self, '_contrastive_outputs'):
+                    # For contrastive models, report similarity and embedding stats
+                    contrastive_out = self._contrastive_outputs
+                    pos_sim = contrastive_out.get('anchor_pos_similarity')
+                    neg_sim = contrastive_out.get('anchor_neg_similarity')
+                    results['stats'] = {
+                        'embed_norm_mean': pred.norm(dim=-1).mean().item(),
+                        'embed_norm_std': pred.norm(dim=-1).std().item(),
+                        'pos_sim_mean': pos_sim.mean().item() if pos_sim is not None else 0,
+                        'neg_sim_mean': neg_sim.mean().item() if neg_sim is not None else 0,
+                        'loss': contrastive_out.get('contrastive_loss', torch.tensor(0)).item(),
+                    }
+                    delattr(self, '_contrastive_outputs')
+                else:
+                    results['stats'] = {
+                        'pred_min': pred_min,
+                        'pred_max': pred_max,
+                        'pred_mean': pred.mean().item(),
+                        'pred_std': pred.std().item()
+                    }
 
         except Exception as e:
             results['passed'] = False
@@ -2962,7 +2985,12 @@ class UnifiedTrainingPipeline:
                 sanity_result = self._run_sanity_check(model, epoch + 1)
                 if sanity_result['passed']:
                     stats = sanity_result.get('stats', {})
-                    logger.info(f"  ✓ Sanity check passed: pred_range=[{stats.get('pred_min', 0):.3f}, {stats.get('pred_max', 0):.3f}], std={stats.get('pred_std', 0):.3f}")
+                    if 'pos_sim_mean' in stats:
+                        # Contrastive model stats
+                        logger.info(f"  ✓ Sanity check passed: pos_sim={stats.get('pos_sim_mean', 0):.3f}, neg_sim={stats.get('neg_sim_mean', 0):.3f}, embed_norm={stats.get('embed_norm_mean', 0):.3f}")
+                    else:
+                        # Standard prediction model stats
+                        logger.info(f"  ✓ Sanity check passed: pred_range=[{stats.get('pred_min', 0):.3f}, {stats.get('pred_max', 0):.3f}], std={stats.get('pred_std', 0):.3f}")
                 else:
                     logger.warning(f"  ⚠️ Sanity check FAILED: {sanity_result['issues']}")
                     if 'NaN' in str(sanity_result['issues']) or 'Inf' in str(sanity_result['issues']):
