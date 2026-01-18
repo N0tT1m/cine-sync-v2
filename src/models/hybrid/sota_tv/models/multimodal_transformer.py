@@ -170,7 +170,7 @@ class MultimodalTransformerTV(nn.Module):
         self.use_gradient_checkpointing = use_gradient_checkpointing
         
         # Text encoder (RoBERTa)
-        self.text_encoder = RobertaModel.from_pretrained('roberta-large')
+        self.text_encoder = RobertaModel.from_pretrained('roberta-large', add_pooling_layer=False)
         if use_gradient_checkpointing:
             self.text_encoder.gradient_checkpointing_enable()
         
