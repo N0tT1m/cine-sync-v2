@@ -60,6 +60,27 @@ TRAINER_TO_SERVABLE: Dict[str, Dict[str, Any]] = {
             'architecture', 'rnn_type', 'tie_weights',
         ),
     },
+    'ncf': {
+        'name': 'ncf',
+        'kind': 'neural_collaborative_filtering',
+        'class_path': 'src.models.collaborative.src.model.NeuralCollaborativeFiltering',
+        'scorer_adapter': 'src.models.adapters.NCFScorer',
+        'init_kwargs_keys': (
+            'num_users', 'num_items', 'embedding_dim',
+            'hidden_layers', 'dropout', 'alpha',
+        ),
+    },
+    'bert4rec': {
+        'name': 'bert4rec',
+        'kind': 'bert4rec',
+        'class_path': 'src.models.advanced.bert4rec_recommender.BERT4Rec',
+        'scorer_adapter': 'src.models.adapters.BERT4RecScorer',
+        'init_kwargs_keys': (
+            'num_items', 'max_seq_len', 'd_model',
+            'num_heads', 'num_layers', 'd_ff', 'dropout',
+            'pad_token', 'mask_token', 'mask_prob',
+        ),
+    },
 }
 
 
