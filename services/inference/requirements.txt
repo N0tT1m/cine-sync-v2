@@ -1,0 +1,22 @@
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+pydantic==2.10.3
+pydantic-settings==2.7.0
+pyyaml==6.0.2
+numpy==1.26.4
+pandas==2.2.3
+pyarrow==18.1.0
+torch==2.5.1
+redis==5.2.1
+httpx==0.28.1
+psycopg[binary]==3.2.3
+python-multipart==0.0.20
+orjson==3.10.12
+prometheus-client==0.21.1
+
+# Enrichment (optional at serve time; required for training + embedding jobs)
+sentence-transformers==3.3.1
+open-clip-torch==2.29.0
+
+# Ensemble stacker
+lightgbm==4.5.0
