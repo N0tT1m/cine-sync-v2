@@ -1558,7 +1558,7 @@ class UnifiedDataset(Dataset):
             'ncf': base_schema,
             'sequential_recommender': {
                 'user_ids': {'type': 'int', 'max': 50000},
-                'item_ids': {'type': 'int_seq', 'max': 100000, 'seq_len': 20},
+                'item_ids': {'type': 'int_seq', 'max': 100000, 'seq_len': 200},
                 'ratings': {'type': 'float', 'min': 1, 'max': 5},
             },
             'two_tower': base_schema,
@@ -1897,11 +1897,12 @@ class UnifiedTrainingPipeline:
                 'num_heads': 8,
                 'num_layers': 4,
             },
-            # Sequential recommender
+            # Sequential recommender — long context for rich histories.
             'sequential_recommender': {
                 'num_items': 100000,
                 'embedding_dim': 128,
                 'hidden_dim': 256,
+                'max_seq_len': 200,
             },
             # GraphSAGE
             'graphsage': {
@@ -2612,21 +2613,27 @@ class UnifiedTrainingPipeline:
             loss = criterion(pred, ratings.float())
             return loss, pred
 
-        # === TWO-TOWER (unified, collaborative IDs) ===
+        # === TWO-TOWER (unified, in-batch sampled softmax) ===
+        # Standard YouTube/Pinterest two-tower setup: every other (user, item)
+        # pair in the batch is a negative for the current user. Optimises
+        # ranking directly instead of regressing on rating.
         if self.model_name == 'two_tower':
-            if user_ids is None or item_ids is None or ratings is None:
-                raise ValueError("two_tower requires user_ids, item_ids, ratings")
-            user_emb = model.encode_user(user_ids=user_ids)
-            item_emb = model.encode_item(item_ids=item_ids)
-            # Cosine similarity in [-1, 1] when towers normalize (default).
-            # Skip the model's temperature for the loss target; the registry
-            # serves the dot product, which already matches this scale.
-            similarity = (user_emb * item_emb).sum(dim=1)
-            target = (ratings.float() / 5.0) * 2.0 - 1.0
-            loss = criterion(similarity, target)
-            return loss, similarity
+            if user_ids is None or item_ids is None:
+                raise ValueError("two_tower requires user_ids, item_ids")
+            user_emb = model.encode_user(user_ids=user_ids)            # (B, D)
+            item_emb = model.encode_item(item_ids=item_ids)            # (B, D)
+            # All-pairs similarity. Diagonal = positives, off-diagonal = negatives.
+            logits = user_emb @ item_emb.T                              # (B, B)
+            logits = logits / model.temperature.clamp(min=1e-3)
+            targets = torch.arange(logits.size(0), device=logits.device)
+            sm_loss = nn.functional.cross_entropy(logits, targets)
+            # pred for sanity check: diagonal scores (positive-pair similarity)
+            pred = logits.diag()
+            return sm_loss, pred
 
-        # === SEQUENTIAL RECOMMENDER (unified transformer, next-item CE) ===
+        # === SEQUENTIAL RECOMMENDER (unified transformer, sampled softmax) ===
+        # Full-vocab CE is OOM-prone at num_items=100K * batch=512. Sample k
+        # negatives per position uniformly and take softmax over (positive, negs).
         if self.model_name == 'sequential_recommender':
             if item_ids is None:
                 raise ValueError("sequential_recommender requires item_ids sequence")
@@ -2634,16 +2641,37 @@ class UnifiedTrainingPipeline:
             if seq.dim() != 2:
                 raise ValueError(f"expected sequential item_ids of shape (B, T), got {tuple(seq.shape)}")
             seq = seq.long()
-            inputs_seq = seq[:, :-1]
-            targets_seq = seq[:, 1:]
-            logits = model(inputs_seq)  # (B, T-1, num_items)
-            ce_loss = nn.functional.cross_entropy(
-                logits.reshape(-1, logits.size(-1)),
-                targets_seq.reshape(-1),
-                ignore_index=0,
-            )
-            # pred for sanity-check: top-1 next item at the last position
-            pred = logits[:, -1, :].argmax(dim=-1).float()
+            inputs_seq = seq[:, :-1]                                     # (B, T-1)
+            targets_seq = seq[:, 1:]                                     # (B, T-1)
+            hidden = model.encode(inputs_seq)                            # (B, T-1, D)
+
+            num_items = model.num_items
+            num_negatives = 100
+            B, Tm1, D = hidden.shape
+            valid_mask = targets_seq.ne(0)                               # ignore pad
+            if valid_mask.any():
+                # Gather positive item embeddings.
+                pos_emb = model.item_embedding(targets_seq)              # (B, T-1, D)
+                # Sample negatives from the vocabulary uniformly.
+                # Shape: (B, T-1, K) — independent draws per position.
+                negs = torch.randint(
+                    1, num_items + 1, (B, Tm1, num_negatives),
+                    device=hidden.device,
+                )
+                neg_emb = model.item_embedding(negs)                     # (B, T-1, K, D)
+                # Score positive and negatives.
+                pos_score = (hidden * pos_emb).sum(dim=-1, keepdim=True) # (B, T-1, 1)
+                neg_score = (neg_emb @ hidden.unsqueeze(-1)).squeeze(-1) # (B, T-1, K)
+                # Sampled-softmax: positive at column 0, negatives after.
+                all_scores = torch.cat([pos_score, neg_score], dim=-1)   # (B, T-1, 1+K)
+                log_probs = nn.functional.log_softmax(all_scores, dim=-1)
+                ce_per_pos = -log_probs[..., 0]                          # (B, T-1)
+                ce_loss = ce_per_pos.masked_select(valid_mask).mean()
+            else:
+                ce_loss = hidden.sum() * 0.0  # keep graph alive
+
+            # pred for sanity check: positive-pair score at the last valid position
+            pred = (hidden[:, -1, :] * model.item_embedding(targets_seq[:, -1])).sum(dim=-1)
             return ce_loss, pred
 
         # === DEFAULT FORWARD (user_ids, item_ids) ===
