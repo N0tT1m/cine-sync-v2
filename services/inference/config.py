@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     # blend strategy name; see services/inference/ensemble/stacker.py:STRATEGIES
     ensemble_strategy: str = "weighted_mean"
 
+    # MMR diversity reranking (no-op until two_tower item_emb.npy exists)
+    mmr_alpha: float = 0.7
+    mmr_top_k: int = 50
+
     redis_url: str = "redis://localhost:6379/3"
     cache_ttl_seconds: int = 900
 
