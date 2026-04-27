@@ -11,7 +11,9 @@ Selected per-model via manifest.yaml -> loader_config.scorer_adapter:
         item_embeddings_path: item_emb.npy
         item_id_map_path: item_ids.json
 """
+from .bert4rec_scorer import BERT4RecScorer
+from .ncf_scorer import NCFScorer
 from .sequential_scorer import SequentialScorer
 from .two_tower_scorer import TwoTowerScorer
 
-__all__ = ["SequentialScorer", "TwoTowerScorer"]
+__all__ = ["BERT4RecScorer", "NCFScorer", "SequentialScorer", "TwoTowerScorer"]
