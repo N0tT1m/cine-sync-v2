@@ -465,20 +465,20 @@ CONTENT_AGNOSTIC_MODELS = {
     },
     # Sequential Models
     'sequential_recommender': {
-        'module': 'src.models.sequential.src.model',
+        'module': 'src.models.sequential',
         'model_class': 'SequentialRecommender',
         'trainer_class': None,
         'config_class': None,
-        'description': 'Sequential recommendations',
+        'description': 'Sequential recommendations (SASRec-style transformer)',
         'priority': 4
     },
     # Two-Tower Models
     'two_tower': {
-        'module': 'src.models.two_tower.src.model',
+        'module': 'src.models.two_tower',
         'model_class': 'TwoTowerModel',
         'trainer_class': None,
         'config_class': None,
-        'description': 'Two-tower retrieval model',
+        'description': 'Two-tower retrieval model (collaborative IDs)',
         'priority': 5
     },
     # Advanced Models
@@ -1882,10 +1882,11 @@ class UnifiedTrainingPipeline:
                 'num_items': 100000,
                 'embedding_dim': 64,
             },
-            # TwoTower requires user_features_dim, item_features_dim
+            # TwoTower (unified) — collaborative ID-based by default. Add
+            # user_text_dim/item_text_dim later for SBERT-text variant.
             'two_tower': {
-                'user_features_dim': 128,
-                'item_features_dim': 256,
+                'num_users': 50000,
+                'num_items': 100000,
                 'embedding_dim': 128,
             },
             # BERT4Rec requires num_items
@@ -2611,6 +2612,40 @@ class UnifiedTrainingPipeline:
             loss = criterion(pred, ratings.float())
             return loss, pred
 
+        # === TWO-TOWER (unified, collaborative IDs) ===
+        if self.model_name == 'two_tower':
+            if user_ids is None or item_ids is None or ratings is None:
+                raise ValueError("two_tower requires user_ids, item_ids, ratings")
+            user_emb = model.encode_user(user_ids=user_ids)
+            item_emb = model.encode_item(item_ids=item_ids)
+            # Cosine similarity in [-1, 1] when towers normalize (default).
+            # Skip the model's temperature for the loss target; the registry
+            # serves the dot product, which already matches this scale.
+            similarity = (user_emb * item_emb).sum(dim=1)
+            target = (ratings.float() / 5.0) * 2.0 - 1.0
+            loss = criterion(similarity, target)
+            return loss, similarity
+
+        # === SEQUENTIAL RECOMMENDER (unified transformer, next-item CE) ===
+        if self.model_name == 'sequential_recommender':
+            if item_ids is None:
+                raise ValueError("sequential_recommender requires item_ids sequence")
+            seq = item_ids
+            if seq.dim() != 2:
+                raise ValueError(f"expected sequential item_ids of shape (B, T), got {tuple(seq.shape)}")
+            seq = seq.long()
+            inputs_seq = seq[:, :-1]
+            targets_seq = seq[:, 1:]
+            logits = model(inputs_seq)  # (B, T-1, num_items)
+            ce_loss = nn.functional.cross_entropy(
+                logits.reshape(-1, logits.size(-1)),
+                targets_seq.reshape(-1),
+                ignore_index=0,
+            )
+            # pred for sanity-check: top-1 next item at the last position
+            pred = logits[:, -1, :].argmax(dim=-1).float()
+            return ce_loss, pred
+
         # === DEFAULT FORWARD (user_ids, item_ids) ===
         if user_ids is None or item_ids is None or ratings is None:
             raise ValueError(f"Missing required inputs for {self.model_name}")
@@ -3112,6 +3147,35 @@ def train_category(
             )
             result = pipeline.train(**training_kwargs)
             results[model_name] = {'status': 'success', 'result': result}
+
+            # Publish to the inference-service registry (manifest.yaml + flat
+            # weights.pt under models/<servable_name>/). Only models with a
+            # mapping in TRAINER_TO_SERVABLE are published; others are no-ops.
+            try:
+                from src.training.manifest_writer import publish as _publish_servable
+                checkpoint_path = pipeline.model_output_dir / 'checkpoint_best.pt'
+                if not checkpoint_path.exists():
+                    checkpoint_path = pipeline.model_output_dir / 'checkpoint_final.pt'
+                if checkpoint_path.exists():
+                    init_kwargs_used = pipeline._get_default_model_args()
+                    init_kwargs_used = {k: v for k, v in init_kwargs_used.items() if not k.startswith('_')}
+                    metrics_payload = {
+                        'epochs_trained': result.get('epochs_trained'),
+                        'best_val_loss': result.get('best_val_loss'),
+                        'final_loss': result.get('final_loss'),
+                    }
+                    manifest_path = _publish_servable(
+                        trainer_model_name=model_name,
+                        checkpoint_path=checkpoint_path,
+                        init_kwargs=init_kwargs_used,
+                        metrics=metrics_payload,
+                        models_dir=Path(output_dir),
+                        dataset=training_kwargs.get('dataset'),
+                    )
+                    results[model_name]['servable_manifest'] = str(manifest_path) if manifest_path else None
+            except Exception as serve_e:
+                logger.warning(f"Failed to publish {model_name} as servable artifact: {serve_e}")
+                results[model_name]['servable_manifest'] = None
 
             # Publish to registry if enabled
             if training_kwargs.get('publish_to_registry') and REGISTRY_AVAILABLE:
