@@ -11,7 +11,10 @@ import os
 from datetime import datetime
 from typing import Iterable
 
-import psycopg
+try:
+    import psycopg
+except ImportError:  # optional: only needed when this DB source is selected
+    psycopg = None  # build_feature_store catches the failure per-source
 
 from .base import EdgeRow, InteractionRow, ItemRow, canonical_user_id
 

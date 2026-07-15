@@ -22,6 +22,7 @@ import pyarrow.parquet as pq
 from .sources import (
     cinesync_pg,
     mommy_milk_me,
+    movielens,
     nami_stream,
     plex_library,
 )
@@ -36,6 +37,7 @@ SOURCES = {
     "nami_stream": nami_stream.NamiStreamSource,
     "mmm_v2": mommy_milk_me.MommyMilkMeSource,
     "plex": plex_library.PlexLibrarySource,
+    "movielens": movielens.MovieLensSource,
 }
 
 
