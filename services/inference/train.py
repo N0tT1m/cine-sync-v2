@@ -54,23 +54,12 @@ class TrainSpec:
 # point at real modules under src/ — the orchestrator's job is to run them in
 # the right order, not to reimplement training.
 TRAIN_SPECS: Dict[str, TrainSpec] = {
-    "hybrid": TrainSpec(
-        name="hybrid",
-        kind="hybrid_cf_content",
-        entry=["python", "-m", "src.models.hybrid.train"],
-        epochs=10,
-    ),
-    "ncf": TrainSpec(
-        name="ncf",
-        kind="neural_collaborative_filtering",
-        entry=["python", "-m", "src.models.collaborative.train"],
+    "two_tower": TrainSpec(
+        name="two_tower",
+        kind="two_tower",
+        entry=["python", "-m", "src.models.two_tower.train_with_wandb"],
         epochs=15,
-    ),
-    "sequential": TrainSpec(
-        name="sequential",
-        kind="sasrec",
-        entry=["python", "-m", "src.models.sequential.train"],
-        epochs=20,
+        requires_embeddings=True,
     ),
     "bert4rec": TrainSpec(
         name="bert4rec",
@@ -84,31 +73,6 @@ TRAIN_SPECS: Dict[str, TrainSpec] = {
         entry=["python", "-m", "src.models.advanced.sentence_bert_two_tower"],
         epochs=15,
         requires_embeddings=True,
-    ),
-    "graphsage": TrainSpec(
-        name="graphsage",
-        kind="graph_neural_network",
-        entry=["python", "-m", "src.models.advanced.graphsage_recommender"],
-        epochs=20,
-        requires_graph=True,
-    ),
-    "contrastive": TrainSpec(
-        name="contrastive",
-        kind="contrastive_learning",
-        entry=["python", "-m", "src.models.unified.contrastive_learning"],
-        requires_embeddings=True,
-    ),
-    "multimodal": TrainSpec(
-        name="multimodal",
-        kind="multimodal_transformer",
-        entry=["python", "-m", "src.models.multimodal_content_understanding"],
-        requires_embeddings=True,
-    ),
-    "vae": TrainSpec(
-        name="vae",
-        kind="variational_autoencoder",
-        entry=["python", "-m", "src.models.advanced.variational_autoencoder"],
-        epochs=30,
     ),
 }
 

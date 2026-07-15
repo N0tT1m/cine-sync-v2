@@ -128,3 +128,9 @@ Cargo.lock
 # Wandb artifacts (experiment tracking - should not be in git)
 wandb/
 *.wandb
+services/lupe-server/target/
+services/lupe_python/test_env/
+services/lupe/target/
+
+# Rust build artifacts (any crate)
+**/target/

@@ -33,27 +33,15 @@ logger = logging.getLogger(__name__)
 # Default kind for enabled-model names that don't (yet) have a manifest.
 # Keeps stubs labeled sensibly in /healthz and drives the ensemble bias.
 DEFAULT_KIND: Dict[str, str] = {
-    "hybrid": "hybrid_cf_content",
-    "ncf": "neural_collaborative_filtering",
-    "sequential": "sasrec",
+    "two_tower": "two_tower",
     "bert4rec": "bert4rec",
     "sbert_two_tower": "two_tower_sbert",
-    "graphsage": "graph_neural_network",
-    "contrastive": "contrastive_learning",
-    "multimodal": "multimodal_transformer",
-    "vae": "variational_autoencoder",
 }
 
 STUB_BIAS: Dict[str, float] = {
-    "hybrid": 0.00,
-    "ncf": 0.02,
-    "sequential": 0.03,
-    "sbert_two_tower": 0.04,
-    "graphsage": 0.02,
+    "two_tower": 0.00,
     "bert4rec": 0.03,
-    "contrastive": -0.02,
-    "multimodal": 0.01,
-    "vae": -0.04,
+    "sbert_two_tower": 0.04,
 }
 
 

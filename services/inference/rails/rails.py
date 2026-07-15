@@ -32,17 +32,17 @@ RAIL_REGISTRY: Dict[str, RailSpec] = {
     ),
     "continue_watching_next": RailSpec(
         key="continue_watching_next",
-        model="sequential",
+        model="bert4rec",
         reason_template="what usually comes next",
     ),
     "because_you_watched": RailSpec(
         key="because_you_watched",
-        model="contrastive",
+        model="two_tower",
         reason_template="similar to {seed}",
     ),
     "more_from_franchise": RailSpec(
         key="more_from_franchise",
-        model="graphsage",
+        model="two_tower",
         reason_template="same franchise as {seed}",
     ),
     "semantic_discover": RailSpec(
@@ -50,14 +50,9 @@ RAIL_REGISTRY: Dict[str, RailSpec] = {
         model="sbert_two_tower",
         reason_template="thematically close to what you liked",
     ),
-    "visual_vibe": RailSpec(
-        key="visual_vibe",
-        model="multimodal",
-        reason_template="same visual style",
-    ),
     "deep_cut": RailSpec(
         key="deep_cut",
-        model="vae",
+        model="ensemble",
         reason_template="under-watched but might land",
     ),
 }
