@@ -10,6 +10,7 @@ import argparse
 import logging
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import torch
 
@@ -19,16 +20,29 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s - %(me
 logger = logging.getLogger("sbert_embeddings")
 
 
+def _as_str(value: object) -> str:
+    # NaN/None/float -> ""; keeps real strings.
+    return value if isinstance(value, str) else ""
+
+
+def _as_str_list(value: object) -> list[str]:
+    # parquet round-trips list columns as numpy arrays, so `value or []` raises
+    # "truth value of an array is ambiguous" — normalize explicitly instead.
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        return [str(v) for v in value]
+    if isinstance(value, np.ndarray):
+        return [str(v) for v in value.tolist()]
+    return []
+
+
 def _build_text(row: pd.Series) -> str:
-    title = row.get("title") or ""
-    title_alt = row.get("title_alt") or ""
-    overview = row.get("overview") or ""
-    genres = row.get("genres") or []
-    tags = row.get("tags") or []
-    if not isinstance(genres, list):
-        genres = []
-    if not isinstance(tags, list):
-        tags = []
+    title = _as_str(row.get("title"))
+    title_alt = _as_str(row.get("title_alt"))
+    overview = _as_str(row.get("overview"))
+    genres = _as_str_list(row.get("genres"))
+    tags = _as_str_list(row.get("tags"))
     parts = [title]
     if title_alt and title_alt != title:
         parts.append(title_alt)
