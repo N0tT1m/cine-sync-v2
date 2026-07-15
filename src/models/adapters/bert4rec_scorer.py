@@ -28,6 +28,10 @@ from services.inference.schemas import ScoredItem
 
 logger = logging.getLogger(__name__)
 
+# Historyless / unknown-item scores sit in [0, FALLBACK_CEILING) when a real
+# model is loaded, so they never outrank items a model genuinely scored.
+FALLBACK_CEILING = 0.05
+
 
 def _load_id_map(path: Path) -> Dict[str, int]:
     with path.open("r", encoding="utf-8") as f:
@@ -142,10 +146,14 @@ class BERT4RecScorer:
         return _hash_to_range(str(item_id), self.num_items)
 
     def _fallback(self, items: List[str], user_id: Optional[str]) -> List[ScoredItem]:
+        # No watch history -> no sequential signal. With a real id map loaded,
+        # keep these scores in a low band so bert4rec doesn't inject noise into
+        # the ensemble ahead of models that actually scored the item.
+        ceiling = FALLBACK_CEILING if self._item_idx else 1.0
         out: List[ScoredItem] = []
         for iid in items:
             digest = hashlib.sha256(f"{self.name}|{user_id or 'anon'}|{iid}".encode()).digest()
-            score = int.from_bytes(digest[:8], "big") / 2**64
+            score = int.from_bytes(digest[:8], "big") / 2**64 * ceiling
             out.append(
                 ScoredItem(
                     item_id=str(iid),

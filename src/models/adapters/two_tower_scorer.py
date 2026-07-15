@@ -37,6 +37,10 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Cold/untrained items (no embedding) are scored in [0, FALLBACK_CEILING) so a
+# real embedding match always ranks above them.
+FALLBACK_CEILING = 0.05
+
 
 def _load_tensor(path: Path) -> np.ndarray:
     if path.suffix in (".npy",):
@@ -107,14 +111,21 @@ class TwoTowerScorer:
         items = list(item_ids)
         user_vec = self._resolve_user(user_id)
 
+        # When a real index is loaded, demote fallbacks into a low band so a
+        # cold/untrained item can never outrank a genuine embedding match in the
+        # ensemble (the content model covers cold items instead). Full-range
+        # pseudo-scores are only kept in degraded mode (no index at all).
+        have_index = self._item_emb is not None
         out: List[ScoredItem] = []
         for item_id in items:
             row = self._item_idx.get(str(item_id))
-            if user_vec is not None and row is not None and self._item_emb is not None:
+            if user_vec is not None and row is not None and have_index:
                 score = float(np.dot(user_vec, self._item_emb[row]))
                 source = "embedding"
             else:
                 score = _pseudo_score(self.name, user_id, item_id)
+                if have_index:
+                    score *= FALLBACK_CEILING  # keep unknowns below real matches
                 source = "fallback"
             out.append(
                 ScoredItem(
