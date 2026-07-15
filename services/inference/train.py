@@ -53,26 +53,29 @@ class TrainSpec:
 # Each TrainSpec maps a registry name → the trainer script to invoke. Entries
 # point at real modules under src/ — the orchestrator's job is to run them in
 # the right order, not to reimplement training.
+# Entries point at the feature-store-native trainers under
+# services/inference/trainers/. Each reads data/feature_store/*.parquet and
+# writes serving-ready artifacts + a complete manifest.yaml (loader_config with
+# a scorer_adapter), so a successful run flips the model from stub to real.
 TRAIN_SPECS: Dict[str, TrainSpec] = {
     "two_tower": TrainSpec(
         name="two_tower",
         kind="two_tower",
-        entry=["python", "-m", "src.models.two_tower.train_with_wandb"],
-        epochs=15,
-        requires_embeddings=True,
+        entry=["python", "-m", "services.inference.trainers.two_tower_cf"],
+        epochs=8,
     ),
     "bert4rec": TrainSpec(
         name="bert4rec",
         kind="bert4rec",
-        entry=["python", "-m", "src.models.advanced.bert4rec_recommender"],
-        epochs=20,
+        entry=["python", "-m", "services.inference.trainers.bert4rec_seq"],
+        epochs=5,
     ),
     "sbert_two_tower": TrainSpec(
         name="sbert_two_tower",
         kind="two_tower_sbert",
-        entry=["python", "-m", "src.models.advanced.sentence_bert_two_tower"],
-        epochs=15,
-        requires_embeddings=True,
+        entry=["python", "-m", "services.inference.trainers.sbert_index"],
+        epochs=1,
+        requires_embeddings=True,  # needs item_features.parquet (SBERT vectors)
     ),
 }
 
@@ -156,7 +159,13 @@ def run_trainer(spec: TrainSpec, extra_env: Optional[Dict[str, str]] = None) -> 
         return False
 
     logger.info("%s finished in %.1fs", spec.name, duration)
-    # Prefer the trainer's own metrics file if it wrote one; otherwise empty.
+    # Feature-store-native trainers write their own complete manifest.yaml
+    # (with loader_config + scorer_adapter). Only fall back to the minimal
+    # manifest writer if the trainer left none — never clobber a real one.
+    manifest_path = settings.models_dir / spec.name / "manifest.yaml"
+    if manifest_path.exists():
+        logger.info("%s wrote its own manifest; keeping it", spec.name)
+        return True
     metrics_path = settings.models_dir / spec.name / "final_metrics.json"
     metrics = None
     if metrics_path.exists():
