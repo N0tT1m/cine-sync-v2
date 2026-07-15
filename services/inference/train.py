@@ -142,11 +142,18 @@ def run_trainer(spec: TrainSpec, extra_env: Optional[Dict[str, str]] = None) -> 
     )
     env.setdefault("CINESYNC_MODEL_OUTDIR", str(settings.models_dir / spec.name))
 
+    # Run the trainer with the SAME interpreter as the orchestrator. A bare
+    # "python" in spec.entry can resolve to a different install than the active
+    # venv (notably on Windows), which then lacks pandas/torch and dies at import.
+    cmd = list(spec.entry)
+    if cmd and cmd[0] in ("python", "python3"):
+        cmd[0] = sys.executable
+
     logger.info("===== training %s =====", spec.name)
     start = time.monotonic()
     try:
         result = subprocess.run(
-            spec.entry, env=env, check=False,
+            cmd, env=env, check=False,
             stdout=sys.stdout, stderr=sys.stderr,
         )
     except FileNotFoundError as exc:
