@@ -5,7 +5,7 @@ Output (sibling files under models/two_tower/):
     item_ids.json     — list of item_id strings, index-aligned with item_emb
     item_index.faiss  — HNSW index for ANN retrieval (services/inference/candidates.py)
 
-Run after `train_all_models.py --model two_tower` completes and the manifest
+Run after the two_tower trainer (services/inference/train.py) completes and the manifest
 exists at models/two_tower/manifest.yaml.
 
 Usage:

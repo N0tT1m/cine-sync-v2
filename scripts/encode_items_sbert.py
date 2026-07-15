@@ -36,7 +36,7 @@ DEFAULT_OUTPUT = REPO_ROOT / "data" / "feature_store" / "items_text.parquet"
 def _build_item_text_corpus(data_dir: Path) -> pd.DataFrame:
     """Walk RealDataLoader's view of the catalogue and collect (item_id, text)."""
     sys.path.insert(0, str(REPO_ROOT))
-    from src.training.train_all_models import RealDataLoader
+    from src.data.real_data_loader import RealDataLoader
 
     rdl = RealDataLoader(data_dir)
     seen: dict[int, str] = {}

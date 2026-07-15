@@ -21,33 +21,23 @@ class Settings(BaseSettings):
     models_dir: Path = REPO_ROOT / "models"
     feature_store_dir: Path = REPO_ROOT / "data" / "feature_store"
 
+    # Consolidated to three complementary models, one per recommendation stage:
+    #   two_tower       -> retrieval / collaborative candidate generation
+    #   bert4rec        -> sequential re-ranking
+    #   sbert_two_tower -> semantic content / cold-start
     enabled_models: List[str] = Field(
         default_factory=lambda: [
-            "hybrid",
-            "ncf",
-            "sequential",
             "two_tower",
-            "sbert_two_tower",
-            "graphsage",
             "bert4rec",
-            "contrastive",
-            "multimodal",
-            "vae",
+            "sbert_two_tower",
         ]
     )
 
     ensemble_weights: dict = Field(
         default_factory=lambda: {
-            "hybrid": 1.0,
-            "ncf": 1.0,
-            "sequential": 1.2,
             "two_tower": 1.2,
-            "sbert_two_tower": 1.3,
-            "graphsage": 1.1,
             "bert4rec": 1.2,
-            "contrastive": 0.8,
-            "multimodal": 1.1,
-            "vae": 0.6,
+            "sbert_two_tower": 1.3,
         }
     )
 

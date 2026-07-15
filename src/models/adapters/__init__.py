@@ -12,8 +12,10 @@ Selected per-model via manifest.yaml -> loader_config.scorer_adapter:
         item_id_map_path: item_ids.json
 """
 from .bert4rec_scorer import BERT4RecScorer
-from .ncf_scorer import NCFScorer
-from .sequential_scorer import SequentialScorer
 from .two_tower_scorer import TwoTowerScorer
 
-__all__ = ["BERT4RecScorer", "NCFScorer", "SequentialScorer", "TwoTowerScorer"]
+# sbert_two_tower is served via TwoTowerScorer as well: at inference time it is
+# a dot-product over cached (semantic) item/user embeddings. Its manifest points
+# scorer_adapter -> src.models.adapters.TwoTowerScorer with its own embedding
+# files, so no separate adapter class is needed.
+__all__ = ["BERT4RecScorer", "TwoTowerScorer"]
