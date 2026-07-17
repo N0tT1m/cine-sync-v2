@@ -2,9 +2,21 @@
 
 Usage:
     python -m data.feature_store.build_feature_store --out data/feature_store
-    python -m data.feature_store.build_feature_store --sources nami_stream,cinesync_pg
+    python -m data.feature_store.build_feature_store --sources movielens,tmdb_tv
+
+Where each source lives (override with the env vars each module documents):
+
+    movielens    data/movies/ml-32m           the only per-user signal on disk
+    tmdb_tv      data/tv/kaggle/*.csv         catalog only; no user signal exists
+    mmm_v2       192.168.1.78:5432            interaction_events; real user signal
+    nami_stream  192.168.1.74:5435
+    plex         192.168.1.74:32400           items() is a stub; yields nothing
+    cinesync_pg  no such database on the fleet; not in the default source list
 
 Each source is independently retryable; failure of one does not block the others.
+That means a wrong host or a missing CSV produces an EMPTY feature store and a
+zero-signal model rather than an error — always read the per-source
+"contributed N interactions" lines before trusting a build.
 Items are merged by item_id — later rows update earlier ones, and owned=True wins.
 """
 from __future__ import annotations
@@ -215,9 +227,14 @@ def run(out_dir: Path, selected: List[str]) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", type=Path, default=Path("data/feature_store"))
+    # movielens and tmdb_tv carry the entire catalog (250k items; the TV side
+    # exists nowhere else), so omitting them rebuilds the store without it.
+    # cinesync_pg is excluded: no `cinesync` database exists on the fleet, so it
+    # only ever raises. plex is excluded: its items() is still a stub that
+    # yields nothing.
     ap.add_argument(
         "--sources",
-        default="cinesync_pg,nami_stream,mmm_v2,plex",
+        default="mmm_v2,nami_stream,movielens,tmdb_tv",
         help="comma-separated subset of sources",
     )
     args = ap.parse_args()
