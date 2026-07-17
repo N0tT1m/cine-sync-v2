@@ -45,6 +45,16 @@ def _load_items(media_type: Optional[str], owned_only: bool) -> tuple[str, ...]:
     if "item_id" not in df.columns:
         logger.warning("items.parquet missing item_id column")
         return tuple()
+    # Callers truncate this to `limit`, so row order decides which slice of the
+    # catalog ever gets ranked. Popularity-ordered means that slice is the most
+    # watched titles; without the column we can only preserve file order.
+    if "popularity" in df.columns:
+        df = df.sort_values("popularity", ascending=False, kind="stable")
+    else:
+        logger.warning(
+            "items.parquet has no popularity column; candidate pool falls back "
+            "to file order — rebuild the feature store to rank by demand"
+        )
     return tuple(df["item_id"].astype(str).tolist())
 
 
@@ -169,6 +179,14 @@ def candidate_pool(
                 return picks
 
     pool = list(_load_items(media_type, owned_only))
+    # Drop what the user has already watched. The ANN branch above does this;
+    # without it here the popularity pool happily recommends the very title the
+    # history was folded in from — and it scores top, because nothing is more
+    # similar to a show than itself. Filter before truncating, or seen items
+    # consume slots in the returned pool.
+    if history:
+        seen = set(history)
+        pool = [item_id for item_id in pool if item_id not in seen]
     return pool[:limit]
 
 

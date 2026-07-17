@@ -28,8 +28,11 @@ logger = logging.getLogger(__name__)
 
 
 def _dsn() -> str:
+    # nami-stream's Postgres runs on 192.168.1.74. The old `localhost` default
+    # only worked when the build ran on that same box; from the training host
+    # (192.168.1.64) it connected to nothing and the source yielded silently.
     return (
-        f"host={os.getenv('NAMI_PG_HOST', 'localhost')} "
+        f"host={os.getenv('NAMI_PG_HOST', '192.168.1.74')} "
         f"port={os.getenv('NAMI_PG_PORT', '5435')} "
         f"dbname={os.getenv('NAMI_PG_DB', 'nami_stream')} "
         f"user={os.getenv('NAMI_PG_USER', 'postgres')} "
@@ -60,7 +63,7 @@ class NamiStreamSource:
             for row in cur:
                 nami_id, tmdb_id, imdb_id, title, year, runtime, overview, genres, _rating = row
                 try:
-                    item_id = canonical_item_id(tmdb_id=tmdb_id, imdb_id=imdb_id, plex_guid=str(nami_id))
+                    item_id = canonical_item_id(tmdb_id=tmdb_id, imdb_id=imdb_id, plex_guid=str(nami_id), media_type="movie")
                 except ValueError:
                     continue
                 yield ItemRow(
@@ -89,7 +92,7 @@ class NamiStreamSource:
             for row in cur:
                 nami_id, tmdb_id, title, year, overview, genres, _rating = row
                 try:
-                    item_id = canonical_item_id(tmdb_id=tmdb_id, plex_guid=str(nami_id))
+                    item_id = canonical_item_id(tmdb_id=tmdb_id, plex_guid=str(nami_id), media_type="tv")
                 except ValueError:
                     continue
                 yield ItemRow(

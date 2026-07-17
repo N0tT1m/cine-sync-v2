@@ -223,6 +223,18 @@ class ModelRegistry:
         loaded = self._resolve(model)
         return loaded.scorer.score(item_ids, user_id=user_id, **kwargs)
 
+    def is_stub(self, model: str) -> bool:
+        """True when `model` serves deterministic pseudo-scores, not predictions.
+
+        Stub output is well-formed and in [0, 1], so it is indistinguishable
+        from a real score at the API boundary. Callers that blend or rank must
+        check this, or they will mix hash noise into real predictions.
+        """
+        try:
+            return self._resolve(model).is_stub
+        except Exception:
+            return True  # unloadable == not trustworthy to serve
+
     def _resolve(self, addr: str) -> LoadedModel:
         if addr in self._by_addr:
             return self._by_addr[addr]
