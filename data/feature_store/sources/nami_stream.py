@@ -60,7 +60,7 @@ class NamiStreamSource:
             for row in cur:
                 nami_id, tmdb_id, imdb_id, title, year, runtime, overview, genres, _rating = row
                 try:
-                    item_id = canonical_item_id(tmdb_id=tmdb_id, imdb_id=imdb_id, plex_guid=str(nami_id))
+                    item_id = canonical_item_id(tmdb_id=tmdb_id, imdb_id=imdb_id, plex_guid=str(nami_id), media_type="movie")
                 except ValueError:
                     continue
                 yield ItemRow(
@@ -89,7 +89,7 @@ class NamiStreamSource:
             for row in cur:
                 nami_id, tmdb_id, title, year, overview, genres, _rating = row
                 try:
-                    item_id = canonical_item_id(tmdb_id=tmdb_id, plex_guid=str(nami_id))
+                    item_id = canonical_item_id(tmdb_id=tmdb_id, plex_guid=str(nami_id), media_type="tv")
                 except ValueError:
                     continue
                 yield ItemRow(

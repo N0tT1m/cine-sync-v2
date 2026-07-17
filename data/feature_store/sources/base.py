@@ -24,6 +24,12 @@ class ItemRow:
     cast: List[str] = field(default_factory=list)
     franchise: Optional[str] = None
     owned: bool = False
+    # Optional demand prior for sources that have no per-user interactions (e.g.
+    # a TMDb vote_count). The build uses observed interaction counts when it has
+    # them and falls back to this, so catalogs without interaction data still
+    # order their candidate pool by something better than file order. Only
+    # compare within a media_type: the scales are not commensurable.
+    popularity: int = 0
     updated_at: datetime = field(default_factory=datetime.utcnow)
 
 
@@ -56,11 +62,28 @@ class Source(Protocol):
     def edges(self) -> Iterable[EdgeRow]: ...
 
 
-def canonical_item_id(*, tmdb_id: Optional[int] = None, anilist_id: Optional[int] = None,
+def canonical_item_id(*, tmdb_id: Optional[int] = None, media_type: Optional[str] = None,
+                      anilist_id: Optional[int] = None,
                       imdb_id: Optional[str] = None, plex_guid: Optional[str] = None) -> str:
-    """Pick the most stable id we have. tmdb > anilist > imdb > plex."""
+    """Pick the most stable id we have. tmdb > anilist > imdb > plex.
+
+    TMDb ids REQUIRE media_type. TMDb numbers movies and TV in separate
+    sequences, so a bare `tmdb:1399` is ambiguous — it is both Game of Thrones
+    (TV) and an unrelated film. Keying on it silently merged 41,686 items when
+    the TV catalog was added, producing rows with one title and another's
+    embedding. The qualified form (`tmdb:movie:862`, `tmdb:tv:1399`) is also
+    exactly mommy-milk-me's ContentRef format, so its refs now map across
+    without translation.
+
+    imdb (`tt…`) and anilist ids are globally unique and need no qualifier.
+    """
     if tmdb_id is not None:
-        return f"tmdb:{tmdb_id}"
+        if not media_type:
+            raise ValueError(
+                f"tmdb_id={tmdb_id} needs media_type ('movie'/'tv'): TMDb ids "
+                f"are only unique within a media type"
+            )
+        return f"tmdb:{media_type}:{tmdb_id}"
     if anilist_id is not None:
         return f"anilist:{anilist_id}"
     if imdb_id:

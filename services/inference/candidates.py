@@ -179,6 +179,14 @@ def candidate_pool(
                 return picks
 
     pool = list(_load_items(media_type, owned_only))
+    # Drop what the user has already watched. The ANN branch above does this;
+    # without it here the popularity pool happily recommends the very title the
+    # history was folded in from — and it scores top, because nothing is more
+    # similar to a show than itself. Filter before truncating, or seen items
+    # consume slots in the returned pool.
+    if history:
+        seen = set(history)
+        pool = [item_id for item_id in pool if item_id not in seen]
     return pool[:limit]
 
 

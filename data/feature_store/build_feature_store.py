@@ -26,6 +26,7 @@ from .sources import (
     movielens,
     nami_stream,
     plex_library,
+    tmdb_tv,
 )
 from .sources.base import EdgeRow, InteractionRow, ItemRow
 
@@ -57,6 +58,7 @@ SOURCES = {
     "mmm_v2": mommy_milk_me.MommyMilkMeSource,
     "plex": plex_library.PlexLibrarySource,
     "movielens": movielens.MovieLensSource,
+    "tmdb_tv": tmdb_tv.TMDbTVSource,
 }
 
 
@@ -85,6 +87,7 @@ def _merge_items(existing: Dict[str, ItemRow], incoming: Iterable[ItemRow]) -> N
             cast=sorted({*prev.cast, *row.cast}),
             franchise=prev.franchise or row.franchise,
             owned=prev.owned or row.owned,
+            popularity=max(prev.popularity, row.popularity),
             updated_at=row.updated_at,
         )
         existing[row.item_id] = merged
@@ -191,10 +194,13 @@ def run(out_dir: Path, selected: List[str]) -> None:
     # `popularity` lets the serving-side candidate pool rank by observed demand.
     # Without it the pool falls back to Parquet row order, which is catalog id
     # order — an arbitrary slice, not the titles anyone actually watches.
+    # Observed interactions win; sources with none (the TV catalog has no
+    # per-user data at all) fall back to the prior they carry, so their pool is
+    # still ordered by something meaningful.
     item_rows = []
     for row in items.values():
         d = asdict(row)
-        d["popularity"] = interactions.popularity.get(row.item_id, 0)
+        d["popularity"] = interactions.popularity.get(row.item_id, 0) or row.popularity
         item_rows.append(d)
     item_rows.sort(key=lambda d: d["popularity"], reverse=True)
 

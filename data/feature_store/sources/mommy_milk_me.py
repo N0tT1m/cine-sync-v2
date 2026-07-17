@@ -7,10 +7,12 @@ scorer and discovery rails read from". Each row is a canonical ContentRef
 type, weight, value, and a consent flag. We read that stream (consent only) and
 its owned catalog (`adult_content`) and map both into the feature store.
 
-Ref reconciliation: mmm-v2 uses 3-part refs (`source:kind:id`); the cine-sync
-feature store uses 2-part canonical ids (`source:id`). We drop the kind so
-`tmdb:movie:603` -> `tmdb:603` lines up with the MovieLens / cinesync_pg items,
-and `adult:content:1234` -> `adult:1234` gets its own namespace.
+Ref reconciliation: TMDb refs pass through unchanged — mmm-v2's `tmdb:movie:603`
+is exactly the feature store's canonical id. The kind used to be dropped here to
+match a 2-part convention, but TMDb numbers movies and TV in separate sequences,
+so `tmdb:1399` names both Game of Thrones and an unrelated film; dropping the
+kind merged them. Non-TMDb refs keep the 2-part form (`adult:content:1234` ->
+`adult:1234`), whose ids are unique on their own.
 
 Connects to mmm-v2's Postgres (default db `mommy_milk_me`). Env overrides:
     MMM_PG_HOST / MMM_PG_PORT / MMM_PG_DB / MMM_PG_USER / MMM_PG_PASSWORD
@@ -43,9 +45,16 @@ def _dsn() -> str:
 
 
 def canonical_from_ref(ref: str) -> str | None:
-    """`source:kind:id` -> `source:id`. None if the ref is malformed."""
+    """mmm-v2 ContentRef -> feature-store canonical id. None if malformed.
+
+    `tmdb:movie:603` -> `tmdb:movie:603`  (kind is part of the id: TMDb reuses
+                                           numbers across movies and TV)
+    `adult:content:1234` -> `adult:1234`  (id is unique without the kind)
+    """
     parts = ref.split(":")
     if len(parts) == 3 and parts[0] and parts[2]:
+        if parts[0] == "tmdb":
+            return ref
         return f"{parts[0]}:{parts[2]}"
     if len(parts) == 2 and parts[0] and parts[1]:  # already 2-part, pass through
         return ref

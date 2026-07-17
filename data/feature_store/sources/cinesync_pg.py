@@ -55,7 +55,7 @@ class CineSyncPGSource:
             for row in cur:
                 tmdb_id, imdb_id, title, year, runtime, overview, genres, media_type = row
                 try:
-                    item_id = canonical_item_id(tmdb_id=tmdb_id, imdb_id=imdb_id)
+                    item_id = canonical_item_id(tmdb_id=tmdb_id, imdb_id=imdb_id, media_type=media_type)
                 except ValueError:
                     continue
                 yield ItemRow(
