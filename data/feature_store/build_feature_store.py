@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+from collections import Counter
 from dataclasses import asdict
 from pathlib import Path
 from typing import Dict, Iterable, List
@@ -30,6 +31,24 @@ from .sources.base import EdgeRow, InteractionRow, ItemRow
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s - %(message)s")
 logger = logging.getLogger("build_feature_store")
+
+# Interactions are the one unbounded table — MovieLens alone is 32M rows, which
+# will not fit in memory as dataclasses. They stream to Parquet in batches
+# against this explicit schema; items/edges are small enough to buffer.
+INTERACTION_SCHEMA = pa.schema(
+    [
+        ("user_id", pa.string()),
+        ("item_id", pa.string()),
+        ("event_type", pa.string()),
+        ("value", pa.float64()),
+        ("weight", pa.float64()),
+        ("timestamp", pa.timestamp("us", tz="UTC")),
+        ("source", pa.string()),
+        ("session_id", pa.string()),
+    ]
+)
+
+INTERACTION_BATCH_ROWS = 500_000
 
 
 SOURCES = {
@@ -83,35 +102,103 @@ def _write_parquet(path: Path, rows: List[dict], schema_hint: str) -> None:
     logger.info("wrote %s (%d rows)", path, len(df))
 
 
+class InteractionWriter:
+    """Batched Parquet writer for the interactions table.
+
+    Rows arrive from a generator and are flushed every INTERACTION_BATCH_ROWS so
+    peak memory stays flat regardless of source size. Closing without any rows
+    still emits a valid empty file carrying INTERACTION_SCHEMA, so downstream
+    readers get a schema rather than a headerless blank.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._writer = pq.ParquetWriter(path, INTERACTION_SCHEMA, compression="snappy")
+        self._batch: List[dict] = []
+        self.rows_written = 0
+        # Interaction count per item, tallied on the single streaming pass.
+        # Bounded by the item count (~87k), not the interaction count, so it
+        # costs nothing to carry and saves a second 32M-row scan later.
+        self.popularity: Counter = Counter()
+
+    def extend(self, rows: Iterable[InteractionRow]) -> int:
+        """Append rows; returns the count added by this call."""
+        added = 0
+        for row in rows:
+            self._batch.append(
+                {
+                    "user_id": row.user_id,
+                    "item_id": row.item_id,
+                    "event_type": row.event_type,
+                    "value": float(row.value),
+                    "weight": float(row.weight),
+                    "timestamp": row.timestamp,
+                    "source": row.source,
+                    "session_id": row.session_id,
+                }
+            )
+            self.popularity[row.item_id] += 1
+            added += 1
+            if len(self._batch) >= INTERACTION_BATCH_ROWS:
+                self._flush()
+        self._flush()
+        return added
+
+    def _flush(self) -> None:
+        if not self._batch:
+            return
+        table = pa.Table.from_pylist(self._batch, schema=INTERACTION_SCHEMA)
+        self._writer.write_table(table)
+        self.rows_written += len(self._batch)
+        self._batch = []
+        logger.info("interactions: %d rows written so far", self.rows_written)
+
+    def close(self) -> None:
+        self._flush()
+        self._writer.close()
+
+
 def run(out_dir: Path, selected: List[str]) -> None:
     items: Dict[str, ItemRow] = {}
-    interactions: List[InteractionRow] = []
     edges: List[EdgeRow] = []
 
-    for name in selected:
-        cls = SOURCES.get(name)
-        if cls is None:
-            logger.error("unknown source: %s", name)
-            continue
-        src = cls()
-        logger.info("reading source: %s", name)
-        try:
-            _merge_items(items, src.items())
-            interactions.extend(src.interactions())
-            edges.extend(src.edges())
-        except Exception:
-            logger.exception("source %s failed; continuing", name)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    interactions = InteractionWriter(out_dir / "interactions.parquet")
 
-    _write_parquet(
-        out_dir / "items.parquet",
-        [asdict(v) for v in items.values()],
-        "items",
+    try:
+        for name in selected:
+            cls = SOURCES.get(name)
+            if cls is None:
+                logger.error("unknown source: %s", name)
+                continue
+            src = cls()
+            logger.info("reading source: %s", name)
+            try:
+                _merge_items(items, src.items())
+                added = interactions.extend(src.interactions())
+                edges.extend(src.edges())
+                logger.info("source %s contributed %d interactions", name, added)
+            except Exception:
+                logger.exception("source %s failed; continuing", name)
+    finally:
+        interactions.close()
+
+    logger.info(
+        "wrote %s (%d rows)", out_dir / "interactions.parquet", interactions.rows_written
     )
-    _write_parquet(
-        out_dir / "interactions.parquet",
-        [asdict(v) for v in interactions],
-        "interactions",
-    )
+
+    # `popularity` lets the serving-side candidate pool rank by observed demand.
+    # Without it the pool falls back to Parquet row order, which is catalog id
+    # order — an arbitrary slice, not the titles anyone actually watches.
+    item_rows = []
+    for row in items.values():
+        d = asdict(row)
+        d["popularity"] = interactions.popularity.get(row.item_id, 0)
+        item_rows.append(d)
+    item_rows.sort(key=lambda d: d["popularity"], reverse=True)
+
+    _write_parquet(out_dir / "items.parquet", item_rows, "items")
     _write_parquet(
         out_dir / "graph_edges.parquet",
         [asdict(v) for v in edges],

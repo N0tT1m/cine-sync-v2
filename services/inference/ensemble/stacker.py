@@ -206,6 +206,10 @@ class Ensemble:
             top_k=getattr(settings, "mmr_top_k", 50),
         )
 
+    def live_models(self) -> List[str]:
+        """Enabled models that are actually trained (i.e. not stubs)."""
+        return [n for n in settings.enabled_models if not registry.is_stub(n)]
+
     def score(
         self,
         item_ids: Iterable[str],
@@ -215,6 +219,22 @@ class Ensemble:
     ) -> EnsembleResponse:
         items = list(item_ids)
         model_names = models or settings.enabled_models
+
+        # Stubs emit deterministic hash pseudo-scores spread across [0, 1]. Blended
+        # in, they don't average out — they dominate, because a real model's
+        # cosine-derived scores are clustered while hash noise spans the range.
+        # An untrained model must contribute nothing rather than plausible noise.
+        # Explicit `models=` requests are honoured as-is (that's the debug path).
+        if models is None:
+            live = [n for n in model_names if not registry.is_stub(n)]
+            skipped = [n for n in model_names if n not in live]
+            if skipped:
+                logger.warning(
+                    "ensemble: excluding untrained models %s; blending %s",
+                    skipped, live or "nothing",
+                )
+            model_names = live
+
         per_model: Dict[str, List[ScoredItem]] = {
             name: registry.score(name, items, user_id=user_id, **kwargs)
             for name in model_names
