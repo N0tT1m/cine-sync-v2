@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 def _dsn() -> str:
     return (
-        f"host={os.getenv('MMM_PG_HOST', '192.168.1.74')} "
+        f"host={os.getenv('MMM_PG_HOST', '192.168.1.78')} "
         f"port={os.getenv('MMM_PG_PORT', '5432')} "
         f"dbname={os.getenv('MMM_PG_DB', 'mommy_milk_me')} "
         f"user={os.getenv('MMM_PG_USER', 'postgres')} "

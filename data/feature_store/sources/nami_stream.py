@@ -28,8 +28,11 @@ logger = logging.getLogger(__name__)
 
 
 def _dsn() -> str:
+    # nami-stream's Postgres runs on 192.168.1.74. The old `localhost` default
+    # only worked when the build ran on that same box; from the training host
+    # (192.168.1.64) it connected to nothing and the source yielded silently.
     return (
-        f"host={os.getenv('NAMI_PG_HOST', 'localhost')} "
+        f"host={os.getenv('NAMI_PG_HOST', '192.168.1.74')} "
         f"port={os.getenv('NAMI_PG_PORT', '5435')} "
         f"dbname={os.getenv('NAMI_PG_DB', 'nami_stream')} "
         f"user={os.getenv('NAMI_PG_USER', 'postgres')} "
