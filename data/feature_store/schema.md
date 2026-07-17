@@ -12,7 +12,7 @@ One row per title across all media types. The `owned` flag is what drives nami-s
 
 | column | type | notes |
 |---|---|---|
-| item_id | string | cine-sync canonical id (prefix by source, e.g. `tmdb:603`, `anilist:21`) |
+| item_id | string | cine-sync canonical id. TMDb ids are qualified by media type (`tmdb:movie:862`, `tmdb:tv:1399`) because TMDb numbers movies and TV in separate sequences — a bare `tmdb:1399` names both Game of Thrones and an unrelated film. Other spaces are globally unique and need no qualifier (`anilist:21`, `imdb:tt0111161`). Minted by `sources/base.py:canonical_item_id`, which rejects a TMDb id with no media type. |
 | media_type | string | `movie`, `tv`, `anime` |
 | title | string | primary display title |
 | title_alt | string | romaji / english / original, concatenated |
@@ -28,6 +28,7 @@ One row per title across all media types. The `owned` flag is what drives nami-s
 | cast | list[string] | TMDb person ids; AniList character+VA ids |
 | franchise | string | AniList relations root / TMDb collection; null if unknown |
 | owned | bool | true if we have a file for it (nami-stream / mmm-v2 / plex) |
+| popularity | int | demand signal the serving candidate pool orders by. Observed interaction count where there is one; otherwise the source's own prior (the TV catalog has no per-user data, so it carries TMDb `vote_count`). Only comparable within a `media_type` — the scales differ. |
 | source | string | primary source of this row |
 | updated_at | timestamp | last canonicalize run |
 
@@ -75,12 +76,32 @@ Edges used by GraphSAGE / LightGCN. Undirected; one row per edge.
 
 ```
 sources/cinesync_pg.py        ─┐
-sources/nami_stream.py         ├─► build_feature_store.py ──► Parquet
-sources/mommy_milk_me.py       │
-sources/plex.py                ─┘
+sources/nami_stream.py         │
+sources/mommy_milk_me.py       ├─► build_feature_store.py ──► Parquet
+sources/plex.py                │
+sources/movielens.py           │   (movies + 32M ratings)
+sources/tmdb_tv.py             ─┘   (TV catalog + overviews, no interactions)
                                        │
                                        ▼
                  enrichment jobs (sbert, clip, audio) ──► item_features.parquet
+```
+
+Which sources carry what matters for which model:
+
+| | interactions | overviews |
+|---|---|---|
+| `movielens` | 32M ratings (movies only) | no |
+| `tmdb_tv` | none — TMDb `vote_count` is an aggregate, not per-user | 90k |
+
+That split is why TV cannot be served by collaborative filtering: no per-user TV
+signal exists in this repo (the IMDb/Metacritic TV files are one aggregate row
+per title). TV is covered by `sbert_two_tower` over overviews instead, which
+needs no interaction data. Build both together:
+
+```
+python -m data.feature_store.build_feature_store --sources movielens,tmdb_tv
+python -m src.enrichment.sbert_embeddings          # -> item_features.parquet
+python -m services.inference.train --models two_tower,sbert_two_tower
 ```
 
 Re-runs are idempotent: canonical ids are deterministic, and each job writes with `pa.write_table(..., existing_data_behavior='overwrite_or_ignore')`.
