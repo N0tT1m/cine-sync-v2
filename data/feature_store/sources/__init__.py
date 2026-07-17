@@ -1,5 +1,5 @@
 from .base import Source, InteractionRow, ItemRow
-from . import cinesync_pg, mommy_milk_me, movielens, nami_stream, plex_library
+from . import cinesync_pg, mommy_milk_me, movielens, nami_stream, plex_library, tmdb_tv
 
 __all__ = [
     "Source",
@@ -10,4 +10,5 @@ __all__ = [
     "mommy_milk_me",
     "movielens",
     "plex_library",
+    "tmdb_tv",
 ]

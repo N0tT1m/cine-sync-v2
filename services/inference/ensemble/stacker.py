@@ -56,6 +56,15 @@ class WeightedMean:
     Items missing from a given model simply don't contribute to the sum for
     that model — no zero-fill — which keeps partial-coverage models from
     dragging scores down against models that scored every candidate.
+
+    Each contribution is additionally scaled by the scorer's own confidence, so
+    a model's vote counts in proportion to how much it actually knows about that
+    item. This is load-bearing rather than a refinement: scorers do not omit
+    unknown items, they return a low-band pseudo-score (confidence 0.1). Without
+    confidence scaling, a model with no coverage of a media type still votes at
+    full weight — e.g. two_tower indexes no TV at all, so on a TV request its
+    hash fallbacks (weight 1.2) rival the semantic model's real signal and
+    corrupt the ranking with noise.
     """
 
     name = "weighted_mean"
@@ -72,8 +81,13 @@ class WeightedMean:
         for model_name, scored in per_model.items():
             w = weights.get(model_name, 1.0)
             for s in scored:
-                acc[s.item_id] += w * s.score
-                weight_total[s.item_id] += w
+                conf = s.confidence if s.confidence is not None else 1.0
+                # Never let a contribution vanish entirely: an item every model
+                # is unsure of should still rank (by its weak signal) rather
+                # than drop out of the response.
+                effective = w * max(conf, 0.01)
+                acc[s.item_id] += effective * s.score
+                weight_total[s.item_id] += effective
                 features[s.item_id][f"score_{model_name}"] = s.score
 
         total_weight = max(sum(weights.values()), 1e-6)
@@ -206,6 +220,10 @@ class Ensemble:
             top_k=getattr(settings, "mmr_top_k", 50),
         )
 
+    def live_models(self) -> List[str]:
+        """Enabled models that are actually trained (i.e. not stubs)."""
+        return [n for n in settings.enabled_models if not registry.is_stub(n)]
+
     def score(
         self,
         item_ids: Iterable[str],
@@ -215,6 +233,22 @@ class Ensemble:
     ) -> EnsembleResponse:
         items = list(item_ids)
         model_names = models or settings.enabled_models
+
+        # Stubs emit deterministic hash pseudo-scores spread across [0, 1]. Blended
+        # in, they don't average out — they dominate, because a real model's
+        # cosine-derived scores are clustered while hash noise spans the range.
+        # An untrained model must contribute nothing rather than plausible noise.
+        # Explicit `models=` requests are honoured as-is (that's the debug path).
+        if models is None:
+            live = [n for n in model_names if not registry.is_stub(n)]
+            skipped = [n for n in model_names if n not in live]
+            if skipped:
+                logger.warning(
+                    "ensemble: excluding untrained models %s; blending %s",
+                    skipped, live or "nothing",
+                )
+            model_names = live
+
         per_model: Dict[str, List[ScoredItem]] = {
             name: registry.score(name, items, user_id=user_id, **kwargs)
             for name in model_names

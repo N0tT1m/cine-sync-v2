@@ -17,8 +17,10 @@ Two-tower scoring strategy:
   2. For each requested item_id, look up item embedding; unseen items fall
      back to a deterministic pseudo-score so the response is still usable
      (same contract as StubScorer).
-  3. Score = dot(user_emb, item_emb). Embeddings are assumed L2-normalized
-     (what `TwoTowerModel` produces by default).
+  3. Score = dot(user_emb, item_emb), a cosine in [-1, 1] because both towers
+     are L2-normalized (what `TwoTowerModel` produces by default). It is
+     rescaled onto [FALLBACK_CEILING, 1] so the full ordering survives and real
+     matches stay above cold-start fallbacks.
 """
 from __future__ import annotations
 
@@ -109,7 +111,8 @@ class TwoTowerScorer:
         **_ctx: object,
     ) -> List[ScoredItem]:
         items = list(item_ids)
-        user_vec = self._resolve_user(user_id)
+        watch_history = _ctx.get("watch_history") or []
+        user_vec = self._resolve_user(user_id, watch_history)
 
         # When a real index is loaded, demote fallbacks into a low band so a
         # cold/untrained item can never outrank a genuine embedding match in the
@@ -120,7 +123,13 @@ class TwoTowerScorer:
         for item_id in items:
             row = self._item_idx.get(str(item_id))
             if user_vec is not None and row is not None and have_index:
-                score = float(np.dot(user_vec, self._item_emb[row]))
+                # Both towers are L2-normalized, so this dot product is a cosine
+                # in [-1, 1]. Rescale onto [FALLBACK_CEILING, 1] rather than
+                # clipping: clipping collapses every negative cosine to a single
+                # 0.0, which discards the ordering across all items the user is
+                # predicted to dislike and drops them below cold-start fallbacks.
+                cosine = float(np.dot(user_vec, self._item_emb[row]))
+                score = FALLBACK_CEILING + (1.0 - FALLBACK_CEILING) * (cosine + 1.0) / 2.0
                 source = "embedding"
             else:
                 score = _pseudo_score(self.name, user_id, item_id)
@@ -139,13 +148,45 @@ class TwoTowerScorer:
         out.sort(key=lambda x: x.score, reverse=True)
         return out
 
-    def _resolve_user(self, user_id: Optional[str]) -> Optional[np.ndarray]:
-        if user_id is None or self._user_emb is None:
+    def _resolve_user(
+        self,
+        user_id: Optional[str],
+        watch_history: Optional[Iterable[str]] = None,
+    ) -> Optional[np.ndarray]:
+        """User vector by lookup, else folded in from watch history.
+
+        The trained user table only covers users present in the training data.
+        Every user of a *different* app (ids like `mmm:42`) misses, and without
+        a fold-in path they would each get pure fallback noise despite the item
+        embeddings being perfectly good.
+
+        Fold-in is the standard MF cold-start trick: represent the user as the
+        mean of the item vectors they engaged with. It needs no retraining and
+        makes a brand-new user personalizable from their first watch.
+        """
+        if self._user_emb is not None and user_id is not None:
+            row = self._user_idx.get(str(user_id))
+            if row is not None:
+                return self._user_emb[row]
+
+        if self._item_emb is None or not watch_history:
             return None
-        row = self._user_idx.get(str(user_id))
-        if row is None:
+        rows = [
+            self._item_idx[str(h)]
+            for h in watch_history
+            if str(h) in self._item_idx
+        ]
+        if not rows:
             return None
-        return self._user_emb[row]
+        vec = self._item_emb[rows].mean(axis=0)
+        norm = float(np.linalg.norm(vec))
+        if norm == 0.0:
+            return None
+        logger.debug(
+            "%s: folded in user %s from %d/%d known history items",
+            self.name, user_id, len(rows), len(list(watch_history)),
+        )
+        return vec / norm
 
 
 def _pseudo_score(name: str, user_id: Optional[str], item_id: str) -> float:

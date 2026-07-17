@@ -95,7 +95,7 @@ class MovieLensSource:
                 continue
             title, year = _split_title_year(row.title)
             yield ItemRow(
-                item_id=canonical_item_id(tmdb_id=tmdb_id),
+                item_id=canonical_item_id(tmdb_id=tmdb_id, media_type="movie"),
                 media_type="movie",
                 title=title,
                 source=self.name,
@@ -124,7 +124,7 @@ class MovieLensSource:
                     continue
                 yield InteractionRow(
                     user_id=canonical_user_id(self.name, int(row.userId)),
-                    item_id=canonical_item_id(tmdb_id=tmdb_id),
+                    item_id=canonical_item_id(tmdb_id=tmdb_id, media_type="movie"),
                     event_type="rating",
                     value=float(row.rating),
                     weight=1.0,

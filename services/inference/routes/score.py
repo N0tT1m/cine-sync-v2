@@ -16,10 +16,15 @@ def _resolve_candidates(req: ScoreRequest) -> list[str]:
         return req.item_ids
     if req.candidate_pool:
         return req.candidate_pool
+    # user_id/history must be forwarded: candidate_pool only attempts ANN
+    # retrieval when it has a user to encode, and falls back to the popularity
+    # pool otherwise.
     pool = candidate_pool(
         media_type=req.media_type,
         owned_only=req.owned_only,
         limit=settings.max_candidates,
+        user_id=req.user_id,
+        history=req.watch_history,
     )
     if not pool:
         raise HTTPException(
@@ -33,6 +38,15 @@ def _resolve_candidates(req: ScoreRequest) -> list[str]:
 # Declared before `/{model}` so the path parameter doesn't shadow the literal.
 @router.post("/ensemble", response_model=EnsembleResponse)
 def score_ensemble(req: ScoreRequest) -> EnsembleResponse:
+    # With every model a stub there is nothing to rank with, and returning 200s
+    # full of hash noise would look like a working recommender to every caller.
+    # 503 lets clients fall back to their own popularity path deliberately.
+    if not ensemble.live_models():
+        raise HTTPException(
+            status_code=503,
+            detail="no trained models loaded; all enabled models are stubs. "
+            "Run: python -m services.inference.train --all",
+        )
     candidates = _resolve_candidates(req)
     result = ensemble.score(
         candidates,

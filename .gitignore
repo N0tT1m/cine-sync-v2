@@ -42,6 +42,19 @@ movie_llm_checkpoints/
 *.txt
 *.json
 
+# Feature store + trained embeddings. All regenerable and far over GitHub's
+# 100MB/file limit (interactions.parquet alone is ~290MB, item_features.parquet
+# ~590MB), so they are built, never committed:
+#   python -m data.feature_store.build_feature_store --sources movielens,tmdb_tv
+#   python -m src.enrichment.sbert_embeddings
+#   python -m services.inference.train --models two_tower,sbert_two_tower
+# NB: match the generated files by extension, not by directory — the builders'
+# source code lives in data/feature_store/ alongside its Parquet output.
+*.npy
+*.parquet
+# Generated per-model manifests — meaningless without the weights they point at.
+/models/*/manifest.yaml
+
 # Keep important small config files
 !dataset-metadata.json
 !requirements.txt
