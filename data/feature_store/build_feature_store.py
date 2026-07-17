@@ -8,7 +8,10 @@ Where each source lives (override with the env vars each module documents):
 
     movielens    data/movies/ml-32m           the only per-user signal on disk
     tmdb_tv      data/tv/kaggle/*.csv         catalog only; no user signal exists
-    mmm_v2       192.168.1.78:5432            interaction_events; real user signal
+    mmm_v2       192.168.1.78:8782 (API)      interaction_events; real user signal.
+                                              Set MMM_API_URL + MMM_API_TOKEN: its
+                                              Postgres is loopback-bound by design,
+                                              so the API is the only way in.
     nami_stream  192.168.1.74:5435
     plex         192.168.1.74:32400           items() is a stub; yields nothing
     cinesync_pg  no such database on the fleet; not in the default source list

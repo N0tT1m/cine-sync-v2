@@ -14,20 +14,36 @@ so `tmdb:1399` names both Game of Thrones and an unrelated film; dropping the
 kind merged them. Non-TMDb refs keep the 2-part form (`adult:content:1234` ->
 `adult:1234`), whose ids are unique on their own.
 
-Connects to mmm-v2's Postgres (default db `mommy_milk_me`). Env overrides:
+Two intake paths, HTTP preferred:
+
+    MMM_API_URL    mmm-v2's API (e.g. http://192.168.1.78:8782). When set,
+    MMM_API_TOKEN  interactions come from GET /v2/discover/export (admin JWT).
+
     MMM_PG_HOST / MMM_PG_PORT / MMM_PG_DB / MMM_PG_USER / MMM_PG_PASSWORD
+                   direct Postgres, default db `mommy_milk_me`.
+
+Prefer the API. mmm-v2 binds Postgres to loopback on purpose ("127.0.0.1:5434"
+in its compose) and exposes only the backend proxy to the LAN, so from any other
+host the DB path cannot connect at all — the API is the intended seam. The DB
+path remains for builds running on mmm-v2's own box, and is the only way to get
+the adult catalog (items), which the export endpoint does not serve.
 """
 from __future__ import annotations
 
 import logging
 import os
 from datetime import datetime, timezone
-from typing import Iterable
+from typing import Iterable, Optional
 
 try:
     import psycopg
 except ImportError:  # optional: only needed when this DB source is selected
     psycopg = None  # build_feature_store catches the failure per-source
+
+try:
+    import httpx
+except ImportError:  # optional: only needed for the API path
+    httpx = None
 
 from .base import EdgeRow, InteractionRow, ItemRow, canonical_user_id
 
@@ -42,6 +58,16 @@ def _dsn() -> str:
         f"user={os.getenv('MMM_PG_USER', 'postgres')} "
         f"password={os.getenv('MMM_PG_PASSWORD', '')}"
     )
+
+
+def _parse_ts(raw) -> Optional[datetime]:
+    """Go's encoding/json emits RFC3339 with a 'Z'; fromisoformat wants +00:00."""
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 def canonical_from_ref(ref: str) -> str | None:
@@ -75,15 +101,103 @@ _EVENT_MAP = {
 }
 
 
+def _to_row(user_id, ref, event_type, weight, value, ts) -> Optional[InteractionRow]:
+    """One mmm-v2 event -> one feature-store row. None if it can't be mapped.
+
+    Shared by both intake paths so the Postgres and HTTP readers can never drift
+    into disagreeing about what a `complete` is worth.
+    """
+    item_id = canonical_from_ref(str(ref))
+    if item_id is None:
+        return None
+    mapped = _EVENT_MAP.get(str(event_type))
+    if mapped is None:
+        return None
+    fs_event, default_value = mapped
+    if default_value is None:            # explicit rating
+        row_value = float(value or 0.0)
+    elif str(event_type) == "complete":  # value is completion 0..1
+        frac = float(value or 0.0)
+        row_value = 5.0 * frac if 0.0 <= frac <= 1.0 else default_value
+    else:
+        row_value = default_value
+    return InteractionRow(
+        user_id=canonical_user_id("mmm", str(user_id)),
+        item_id=item_id,
+        event_type=fs_event,
+        value=row_value,
+        weight=float(weight) if weight is not None else 1.0,
+        timestamp=ts or datetime.now(timezone.utc),
+        source="mmm_v2",
+    )
+
+
 class MommyMilkMeSource:
     name = "mmm_v2"
 
     def __init__(self, dsn: str | None = None) -> None:
         self.dsn = dsn or _dsn()
+        self.api_url = (os.getenv("MMM_API_URL") or "").rstrip("/")
+        self.api_token = os.getenv("MMM_API_TOKEN", "")
 
     # ---- interactions: the unified consented event stream -------------
 
     def interactions(self) -> Iterable[InteractionRow]:
+        if self.api_url:
+            yield from self._interactions_via_api()
+            return
+        yield from self._interactions_via_pg()
+
+    def _interactions_via_api(self) -> Iterable[InteractionRow]:
+        """Read GET /v2/discover/export, walking keyset pages until empty.
+
+        The endpoint filters to consented events server-side; there is no flag
+        to ask for more, which is the point.
+        """
+        if httpx is None:
+            logger.warning("MMM_API_URL set but httpx not installed; mmm_v2 yields nothing")
+            return
+        if not self.api_token:
+            logger.warning("MMM_API_URL set but MMM_API_TOKEN empty; export is admin-only, expect 401")
+
+        url = f"{self.api_url}/v2/discover/export"
+        headers = {"Authorization": f"Bearer {self.api_token}"}
+        after_id = 0
+        total = 0
+        try:
+            with httpx.Client(timeout=60.0) as client:
+                while True:
+                    resp = client.get(
+                        url,
+                        params={"after_id": after_id, "limit": 1000},
+                        headers=headers,
+                    )
+                    resp.raise_for_status()
+                    payload = resp.json()
+                    events = payload.get("events") or []
+                    if not events:
+                        break
+                    for e in events:
+                        row = _to_row(
+                            e.get("user_id"),
+                            e.get("ref", ""),
+                            e.get("event_type", ""),
+                            e.get("weight"),
+                            e.get("value"),
+                            _parse_ts(e.get("created_at")),
+                        )
+                        if row is not None:
+                            total += 1
+                            yield row
+                    next_after = payload.get("next_after_id")
+                    if next_after is None:
+                        break
+                    after_id = next_after
+            logger.info("mmm_v2: read %d consented events from %s", total, url)
+        except httpx.HTTPError as exc:
+            logger.warning("mmm_v2 export API unavailable (%s); yielded %d", exc, total)
+
+    def _interactions_via_pg(self) -> Iterable[InteractionRow]:
         if psycopg is None:
             logger.info("psycopg not installed; mmm_v2 interactions skipped")
             return
@@ -97,29 +211,9 @@ class MommyMilkMeSource:
                     """
                 )
                 for user_id, ref, event_type, weight, value, ts in cur:
-                    item_id = canonical_from_ref(str(ref))
-                    if item_id is None:
-                        continue
-                    mapped = _EVENT_MAP.get(str(event_type))
-                    if mapped is None:
-                        continue
-                    fs_event, default_value = mapped
-                    if default_value is None:            # explicit rating
-                        row_value = float(value or 0.0)
-                    elif str(event_type) == "complete":  # value is completion 0..1
-                        frac = float(value or 0.0)
-                        row_value = 5.0 * frac if 0.0 <= frac <= 1.0 else default_value
-                    else:
-                        row_value = default_value
-                    yield InteractionRow(
-                        user_id=canonical_user_id("mmm", str(user_id)),
-                        item_id=item_id,
-                        event_type=fs_event,
-                        value=row_value,
-                        weight=float(weight) if weight is not None else 1.0,
-                        timestamp=ts or datetime.now(timezone.utc),
-                        source=self.name,
-                    )
+                    row = _to_row(user_id, ref, event_type, weight, value, ts)
+                    if row is not None:
+                        yield row
         except psycopg.Error as exc:
             logger.info("mmm_v2 interaction_events unavailable: %s", exc)
 
